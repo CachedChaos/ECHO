@@ -16,6 +16,7 @@ ECHO offers a comprehensive suite of tools and features across various tabs, eac
 - **Flexibility and Control:** Open, create, import, or delete cases with ease, giving you complete control over your case data.
 
 ---
+![Screenshot of ECHO Home Tab](ECHO_Home.png)
 
 ## Getting Started
 
