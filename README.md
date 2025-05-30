@@ -186,5 +186,3 @@ Manage and update DFIR tools within the program.
 ECHO is a versatile DFIR tool designed to facilitate efficient and organized forensic investigations. Each tab in the GUI offers specific functionalities to enhance the digital forensic workflow.
 
 ---
-
-*For more information, screenshots, or contributing guidelines, see the project Wiki or the `/docs` folder.*
