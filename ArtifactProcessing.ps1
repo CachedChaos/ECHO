@@ -1247,11 +1247,11 @@ function ProcessZimmermanButton_Click {
 		Get-ItemProperty -Name "Version" -ErrorAction SilentlyContinue | 
 		Select-Object -ExpandProperty Version
 	
-	# Check if any installed version is .NET 6 or greater
+	# Check if any installed version is .NET 9 or greater
 	$validDotNetVersionInstalled = $false
 	foreach ($version in $dotNetVersions) {
 		$majorVersion = $version.Split('-')[0].Split('.')[0]
-		if ([int]$majorVersion -ge 6) {
+		if ([int]$majorVersion -ge 9) {
 			$validDotNetVersionInstalled = $true
 			break
 		}
@@ -1316,13 +1316,13 @@ function Process-ZimmermanTools {
 
 	# Modify ZimmermanToolsPath to point to the directory containing the executables
 	$ZimmermanToolsPath = (Get-Item $ZimmermanFilePath).Directory.FullName
-	$net6Path = Join-Path -Path $ZimmermanToolsPath -ChildPath "net6"
-    if (-not (Test-Path -Path $net6Path)) {
+	$net9Path = Join-Path -Path $ZimmermanToolsPath -ChildPath "net9"
+    if (-not (Test-Path -Path $net9Path)) {
         # Update the GUI with a message and return from the function
-        Update-Log "This program requires the .NET 6 version of Zimmerman Tools located in a 'net6' directory within $ZimmermanToolsPath." "ProcessSystemTextBox"
+        Update-Log "This program requires the .NET 9 version of Zimmerman Tools located in a 'net9' directory within $ZimmermanToolsPath." "ProcessSystemTextBox"
         return
     } else {
-        $ZimmermanToolsPath = $net6Path
+        $ZimmermanToolsPath = $net9Path
     }
 	Update-Log "Zimmerman Tool: $($ZimmermanToolsPath) SelectedModule: $($SelectedModule) ArtifactPath: $($ArtifactPath) ArtifactfullPath: $($ArtifactfullPath)  outputFolderPath: $($outputFolderPath)" "ProcessSystemTextBox"
     # Start processing job
@@ -1569,7 +1569,7 @@ function Check-ZimmermanToolsStatus {
 function UpdateZimmermanButton_Click {
     $ZimmermanToolsPath = $ZimmermanPathTextBox.Text.Trim().Trim('"')
     $ZimmermanDirectory = [System.IO.Path]::GetDirectoryName($ZimmermanToolsPath) 
-    $ZimmermanCommand = "& `"$ZimmermanToolsPath`""
+    $ZimmermanCommand = "& `"$ZimmermanToolsPath`" -Dest `"$ZimmermanDirectory`""
     Update-Log "Zimmerman Command is $ZimmermanCommand" "ProcessSystemTextBox"
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $job = Start-Job -ScriptBlock {

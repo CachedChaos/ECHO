@@ -1010,7 +1010,7 @@ function Download-ZimmermanTools {
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
 
-    $downloadUrl = "https://f001.backblazeb2.com/file/EricZimmermanTools/Get-ZimmermanTools.zip"
+    $downloadUrl = "https://download.ericzimmermanstools.com/Get-ZimmermanTools.zip"
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
@@ -1038,7 +1038,7 @@ function Download-ZimmermanTools {
         # Run the Zimmerman Tools script regardless of hash change
         $scriptPath = Join-Path $ZimmermanToolsFolder "Get-ZimmermanTools.ps1"
         if (Test-Path $scriptPath) {
-            Start-Process "powershell.exe" -ArgumentList "-NoExit", "-File `"$scriptPath`"" -WorkingDirectory $ZimmermanToolsFolder -NoNewWindow
+            Start-Process "powershell.exe" -ArgumentList "-NoExit", "-File `"$scriptPath`" -Dest `"$ZimmermanToolsFolder`"" -WorkingDirectory $ZimmermanToolsFolder -NoNewWindow
             Update-Log "ZimmermanTools script executed." "tabPageToolsTextBox"
         }
     } else {
