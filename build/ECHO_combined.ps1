@@ -1453,40 +1453,45 @@ function Check-ZimmermanProcessingStatus {
 }
 
 function ProcessZimmermanButton_Click {
-	if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZimmermanPathTextBox.Text) {
+    if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZimmermanPathTextBox.Text) {
         [System.Windows.MessageBox]::Show("Please select an artifact path and Zimmerman Tools main directory or Get-ZimmermanTools.ps1.")
         return
     }
-	# Retrieve installed .NET versions
-	$dotNetVersions = Get-ChildItem -Path 'HKLM:\SOFTWARE\dotnet\Setup\InstalledVersions\' -Recurse | 
-		Get-ItemProperty -Name "Version" -ErrorAction SilentlyContinue | 
-		Select-Object -ExpandProperty Version
-	
-	# Check if any installed version is .NET 9 or greater
-	$validDotNetVersionInstalled = $false
-	foreach ($version in $dotNetVersions) {
-		$majorVersion = $version.Split('-')[0].Split('.')[0]
-		if ([int]$majorVersion -ge 9) {
-			$validDotNetVersionInstalled = $true
-			break
-		}
-	}
-	
-	# Logic based on whether a valid version is installed
-	if ($validDotNetVersionInstalled) {
-		Update-Log "Starting Zimmerman Tools..." "ProcessSystemTextBox"
-		$selectedModule = $ZtoolsComboBox.SelectedItem
-		$ArtifactPath = $ArtifactProcessingPathTextBox.Text.Trim().Trim('"')
-		$ZimmermanFilePath = $ZimmermanPathTextBox.Text.Trim().Trim('"')
-		Process-ZimmermanTools -SelectedModule $selectedModule -ArtifactPath $ArtifactPath -ZimmermanFilePath $ZimmermanFilePath
-		# Start the timer
-		if (-not $zimmermanProcessingTimer.Enabled) {
-			$zimmermanProcessingTimer.Start()
-		}
-	} else {
-		Update-Log "Zimmerman Tools used in this program requires .NET version 9 or greater. Please install the required .NET version." "ProcessSystemTextBox"
-		return
-	}	
+
+    # Use dotnet CLI to check for installed runtimes
+    $validDotNetVersionInstalled = $false
+    try {
+        $dotnetOutput = & dotnet --list-runtimes 2>$null
+        foreach ($line in $dotnetOutput) {
+            if ($line -match '^Microsoft\.NETCore\.App\s+(\d+)\.') {
+                $majorVersion = [int]$matches[1]
+                if ($majorVersion -ge 9) {
+                    $validDotNetVersionInstalled = $true
+                    break
+                }
+            }
+        }
+    } catch {
+        Update-Log "Could not detect .NET runtimes. Please ensure .NET is installed and 'dotnet' is on your PATH." "ProcessSystemTextBox"
+        return
+    }
+
+    # Logic based on whether a valid version is installed
+    if ($validDotNetVersionInstalled) {
+        Update-Log "Starting Zimmerman Tools..." "ProcessSystemTextBox"
+        $selectedModule = $ZtoolsComboBox.SelectedItem
+        $ArtifactPath = $ArtifactProcessingPathTextBox.Text.Trim().Trim('"')
+        $ZimmermanFilePath = $ZimmermanPathTextBox.Text.Trim().Trim('"')
+        Process-ZimmermanTools -SelectedModule $selectedModule -ArtifactPath $ArtifactPath -ZimmermanFilePath $ZimmermanFilePath
+
+        # Start the timer
+        if (-not $zimmermanProcessingTimer.Enabled) {
+            $zimmermanProcessingTimer.Start()
+        }
+    } else {
+        Update-Log "Zimmerman Tools used in this program require .NET version 9 or greater. Please install the required .NET version." "ProcessSystemTextBox"
+        return
+    }
 }
 
 function Process-ZimmermanTools {
