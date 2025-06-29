@@ -16,6 +16,7 @@ ECHO offers a comprehensive suite of tools and features across various tabs, eac
 - **Flexibility and Control:** Open, create, import, or delete cases with ease, giving you complete control over your case data.
 
 ---
+![Screenshot of ECHO Home Tab](ECHO_Home.png)
 
 ## Getting Started
 
@@ -186,3 +187,4 @@ Manage and update DFIR tools within the program.
 ECHO is a versatile DFIR tool designed to facilitate efficient and organized forensic investigations. Each tab in the GUI offers specific functionalities to enhance the digital forensic workflow.
 
 ---
+“This project is for educational and DFIR professional use. Use at your own risk. The authors are not responsible for misuse or data loss.”
