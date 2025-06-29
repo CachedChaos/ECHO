@@ -1269,7 +1269,7 @@ function ProcessZimmermanButton_Click {
 			$zimmermanProcessingTimer.Start()
 		}
 	} else {
-		Update-Log "Zimmerman Tools used in this program requires .NET version 6 or greater. Please install the required .NET version." "ProcessSystemTextBox"
+		Update-Log "Zimmerman Tools used in this program requires .NET version 9 or greater. Please install the required .NET version." "ProcessSystemTextBox"
 		return
 	}	
 }
