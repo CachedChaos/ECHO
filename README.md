@@ -58,8 +58,11 @@ If you have downloaded or built the standalone executable (`ECHO.exe`):
 **Requirements:**  
 - Windows 10/11
 - PowerShell 5.1 or later (for script version)
-- .NET Framework 4.5+ (usually already included on modern Windows)
-
+- **.NET Runtime**
+  - .NET Framework 4.5+ (for legacy components)
+  - **.NET 9 Runtime (required for Zimmerman Tools)**
+> Note: Eric Zimmerman's tools require the modern .NET runtime (currently .NET 9),
+> which is separate from the legacy .NET Framework included with Windows.
 ---
 
 ## Tab Overviews
