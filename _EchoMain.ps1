@@ -417,13 +417,22 @@ function CreateCaseButton_Click {
 
 function OpenCaseButton_Click {
     # Get the selected case name from the ExistingCasesComboBox
-    $CaseName = $existingCasesComboBox.SelectedItem
-    if (-not $CaseName) {
+    $selectedItem = [string]$existingCasesComboBox.SelectedItem
+    if (-not $selectedItem) {
         [System.Windows.MessageBox]::Show("Please select a case from the dropdown.", "Error", "OK", "Error")
         return
     }
-    $CaseName = $CaseName -replace '\s+\(Missing\)$', ''
-    Open-Case -CaseName $CaseName
+
+    $selectedItem = $selectedItem -replace '\s+\(Missing\)$', ''
+    $selectionParts = $selectedItem -split '\s+\|\s+', 2
+    $CaseName = $selectionParts[0].Trim()
+    $CasePath = if ($selectionParts.Count -gt 1) { $selectionParts[1].Trim() } else { $null }
+
+    if (-not [string]::IsNullOrWhiteSpace($CasePath)) {
+        Open-Case -CaseName $CaseName -CasePath $CasePath
+    } else {
+        Open-Case -CaseName $CaseName
+    }
 }
 
 function RemoveCaseButton_Click {
@@ -432,11 +441,20 @@ function RemoveCaseButton_Click {
 
     if (-not [string]::IsNullOrWhiteSpace($selectedItem)) {
         # Remove "(Missing)" from the case name if present
-        $selectedCaseName = $selectedItem -replace '\s+\(Missing\)$', ''
+        $selectedItem = $selectedItem -replace '\s+\(Missing\)$', ''
+        $selectionParts = $selectedItem -split '\s+\|\s+', 2
+        $selectedCaseName = $selectionParts[0].Trim()
+        $selectedCasePath = if ($selectionParts.Count -gt 1) { $selectionParts[1].Trim() } else { $null }
 
         # Get cases from CSV
         $cases = Get-Cases
-        $remainingCases = $cases | Where-Object { $_.Name -ne $selectedCaseName }
+        if (-not [string]::IsNullOrWhiteSpace($selectedCasePath)) {
+            $remainingCases = $cases | Where-Object {
+                -not ($_.Name -eq $selectedCaseName -and $_.Path -eq $selectedCasePath)
+            }
+        } else {
+            $remainingCases = $cases | Where-Object { $_.Name -ne $selectedCaseName }
+        }
 
         # Update the cases.csv file
         $remainingCases | Export-Csv -Path "$executableDirectory\cases.csv" -NoTypeInformation -Force
@@ -471,7 +489,7 @@ function PopulateCaseControls {
     $existingCasesComboBox.Items.Clear()
     foreach ($case in $cases) {
         $statusText = if ($case.Status -eq "Exists") { "" } else { " (Missing)" }
-        $displayText = "$($case.Name)$statusText" # Add "(Missing)" for cases that don't exist
+        $displayText = "$($case.Name) | $($case.Path)$statusText"
         [void]$existingCasesComboBox.Items.Add($displayText)
     }
 }
