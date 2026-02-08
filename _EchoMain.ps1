@@ -2222,773 +2222,106 @@ $TimelineDateRangeCheckBox.Add_Unchecked({
 })
 
 # processingtools controls
+function Set-ProcessingControlVisibility {
+    param(
+        [object[]]$Controls,
+        [string]$Visibility
+    )
+
+    foreach ($control in $Controls) {
+        if ($null -ne $control) {
+            $control.Visibility = $Visibility
+        }
+    }
+}
+
+$processingToolControlSets = @{
+    "BulkExtractor" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessBulkExtractorButton, $BulkExtractorPathTextBox, $BrowseBulkExtractorPathButton, $BulkTextBlock
+    )
+    "Chainsaw" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessChainsawButton, $ChainsawPathTextBox, $BrowseChainsawPathButton, $ChainsawJson, $ChawnsawTextBlock
+    )
+    "Zimmerman Tools" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessZimmermanButton, $ZtoolsComboBox, $ZimmermanPathTextBox, $BrowseZimmermanPathButton, $UpdateZimmermanButton, $ZimmermanTextBlock
+    )
+    "Extract Archives" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $Process7zipButton, $SevenzipPathTextBox, $Browse7zipPathButton, $sevenzipTextBlock
+    )
+    "Geolocate IPs" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $GeoLocateButton, $GeoLite2CityDBPathTextBox, $BrowseGeoLite2CityDBPathButton, $CheckVirusTotal, $GeolocateTextBlock
+    )
+    "Hayabusa" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessHayabusaButton, $HayabusaPathTextBox, $BrowseHayabusaPathButton,
+        $HayabusaDateRangeCheckBox, $HayabusaStartDate, $HayabusaStartDatePicker, $HayabusaEndDate, $HayabusaEndDatePicker,
+        $HayabusaGeoDBCheckBox, $HayabusaTextBlock
+    )
+    "Plaso Timeline" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessPlasoButton, $PlasoPathTextBox, $BrowsePlasoPathButton,
+        $PlasoDateRangeCheckBox, $PlasoStartDate, $PlasoStartDatePicker, $PlasoEndDate, $PlasoEndDatePicker,
+        $PsortOnlyCheckBox, $PlasoTextBlock
+    )
+    "Zircolite" = @(
+        $ProcessToolLocation, $ProcessToolExtraArguments,
+        $ProcessZircoliteButton, $ZircolitePathTextBox, $BrowseZircolitePathButton,
+        $ZircolitejsonCheckBox, $ZircoliteRules, $ZircoliteRulesComboBox, $ZircoliteTemplates, $ZircoliteTemplatesComboBox,
+        $ZircoliteDateRangeCheckBox, $ZircoliteStartDate, $ZircoliteStartDatePicker, $ZircoliteEndDate, $ZircoliteEndDatePicker,
+        $UpdateZircoliteButton, $ZircolitepackageCheckBox, $ZircolitesysmonCheckBox, $ZircoliteTextBlock
+    )
+    "Timeline Artifacts" = @(
+        $ProcessToolLocation,
+        $ProcessTimelineArtifactsButton, $IncludeChainsaw, $IncludeHayabusa, $IncludeZimmerman, $IncludeZircolite,
+        $ExportTimelineArtifactsButton,
+        $TimelineArtifactsStartDate, $TimelineArtifactsStartDatePicker, $TimelineArtifactsEndDate, $TimelineArtifactsEndDatePicker,
+        $TimelineDateRangeCheckBox, $TimelineDateIOCCheckBox,
+        $sqlitePathTextBox, $BrowsesqlitePathButton, $OpenCustomTimelineIOCsButton,
+        $TimelineArtifactTextBlock
+    )
+}
+
+$allProcessingToolControls = @(
+    $ProcessToolLocation,
+    $ProcessToolExtraArguments,
+    $ProcessBulkExtractorButton, $BulkExtractorPathTextBox, $BrowseBulkExtractorPathButton, $BulkTextBlock,
+    $ProcessChainsawButton, $ChainsawPathTextBox, $BrowseChainsawPathButton, $ChainsawJson, $ChawnsawTextBlock,
+    $ProcessZimmermanButton, $ZtoolsComboBox, $ZimmermanPathTextBox, $BrowseZimmermanPathButton, $UpdateZimmermanButton, $ZimmermanTextBlock,
+    $Process7zipButton, $SevenzipPathTextBox, $Browse7zipPathButton, $sevenzipTextBlock,
+    $GeoLocateButton, $GeoLite2CityDBPathTextBox, $BrowseGeoLite2CityDBPathButton, $CheckVirusTotal, $GeolocateTextBlock,
+    $ProcessHayabusaButton, $HayabusaPathTextBox, $BrowseHayabusaPathButton,
+    $HayabusaDateRangeCheckBox, $HayabusaStartDate, $HayabusaStartDatePicker, $HayabusaEndDate, $HayabusaEndDatePicker,
+    $HayabusaGeoDBCheckBox, $HayabusaTextBlock,
+    $ProcessPlasoButton, $PlasoPathTextBox, $BrowsePlasoPathButton,
+    $PlasoDateRangeCheckBox, $PlasoStartDate, $PlasoStartDatePicker, $PlasoEndDate, $PlasoEndDatePicker,
+    $PsortOnlyCheckBox, $PlasoTextBlock,
+    $ProcessZircoliteButton, $ZircolitePathTextBox, $BrowseZircolitePathButton,
+    $ZircolitejsonCheckBox, $ZircoliteRules, $ZircoliteRulesComboBox, $ZircoliteTemplates, $ZircoliteTemplatesComboBox,
+    $ZircoliteDateRangeCheckBox, $ZircoliteStartDate, $ZircoliteStartDatePicker, $ZircoliteEndDate, $ZircoliteEndDatePicker,
+    $UpdateZircoliteButton, $ZircolitepackageCheckBox, $ZircolitesysmonCheckBox, $ZircoliteTextBlock,
+    $ProcessTimelineArtifactsButton, $IncludeChainsaw, $IncludeHayabusa, $IncludeZimmerman, $IncludeZircolite,
+    $ExportTimelineArtifactsButton,
+    $TimelineArtifactsStartDate, $TimelineArtifactsStartDatePicker, $TimelineArtifactsEndDate, $TimelineArtifactsEndDatePicker,
+    $TimelineDateRangeCheckBox, $TimelineDateIOCCheckBox,
+    $sqlitePathTextBox, $BrowsesqlitePathButton, $OpenCustomTimelineIOCsButton,
+    $TimelineArtifactTextBlock
+)
+
 $ProcessingToolComboBox.Add_SelectionChanged({
-    switch ($ProcessingToolComboBox.SelectedItem.Content) {
-        "BulkExtractor" {
-            # Show BulkExtractor controls
-            $ProcessBulkExtractorButton.Visibility = 'Visible'
-			$BulkExtractorPathTextBox.Visibility = 'Visible'
-			$BrowseBulkExtractorPathButton.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$BulkTextBlock.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Chainsaw" {
-            # Show Chainsaw controls
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$ProcessChainsawButton.Visibility = 'Visible'
-			$ChainsawPathTextBox.Visibility = 'Visible'
-			$BrowseChainsawPathButton.Visibility = 'Visible'
-			$ChainsawJson.Visibility = 'Visible'
-			$ChawnsawTextBlock.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Zimmerman Tools" {
-            # Show Zimmerman Tools Controls
-            $ProcessZimmermanButton.Visibility = 'Visible'
-            $ZtoolsComboBox.Visibility = 'Visible'
-			$ZimmermanPathTextBox.Visibility = 'Visible'
-			$BrowseZimmermanPathButton.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-            $ZimmermanTextBlock.Visibility = 'Visible'
-			$UpdateZimmermanButton.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Extract Archives" {
-            # Show Elastic Controls
-			$Process7zipButton.Visibility = 'Visible'
-			$SevenzipPathTextBox.Visibility = 'Visible'
-			$Browse7zipPathButton.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$sevenzipTextBlock.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Geolocate IPs" {
-            # Show Geolocate Controls
-			$GeoLocateButton.Visibility = 'Visible'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Visible'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Visible'
-			$CheckVirusTotal.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$GeolocateTextBlock.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Plaso Timeline" {
-            # Show Plaso Controls
-			$ProcessPlasoButton.Visibility = 'Visible'
-			$PlasoPathTextBox.Visibility = 'Visible'
-			$BrowsePlasoPathButton.Visibility = 'Visible'
-			$PlasoDateRangeCheckBox.Visibility = 'Visible'
-			$PlasoStartDate.Visibility = 'Visible'
-			$PlasoStartDatePicker.Visibility = 'Visible'
-			$PlasoEndDate.Visibility = 'Visible'
-			$PlasoEndDatePicker.Visibility = 'Visible'
-			$PsortOnlyCheckBox.Visibility = 'Visible'
-			$PlasoTextBlock.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$sqlitePathTextBox.Visibility = 'Visible'
+    $selectedTool = $null
+    if ($ProcessingToolComboBox.SelectedItem -and $ProcessingToolComboBox.SelectedItem.Content) {
+        $selectedTool = [string]$ProcessingToolComboBox.SelectedItem.Content
+    }
 
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Hayabusa" {
-            # Show Hayabusa Controls
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$ProcessHayabusaButton.Visibility = 'Visible'
-			$HayabusaPathTextBox.Visibility = 'Visible'
-			$BrowseHayabusaPathButton.Visibility = 'Visible'
-			$HayabusaDateRangeCheckBox.Visibility = 'Visible'
-			$HayabusaStartDate.Visibility = 'Visible'
-			$HayabusaStartDatePicker.Visibility = 'Visible'
-			$HayabusaEndDate.Visibility = 'Visible'
-			$HayabusaEndDatePicker.Visibility = 'Visible'
-			$HayabusaGeoDBCheckBox.Visibility = 'Visible'
-			$HayabusaTextBlock.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Zircolite" {
-            # Show Zircolite Controls
-			$ProcessToolLocation.Visibility = 'Visible'
-			$ProcessToolExtraArguments.Visibility = 'Visible'
-			$ProcessZircoliteButton.Visibility = 'Visible'
-			$ZircolitePathTextBox.Visibility = 'Visible'
-			$BrowseZircolitePathButton.Visibility = 'Visible'
-			$ZircolitejsonCheckBox.Visibility = 'Visible'
-			$ZircoliteRules.Visibility = 'Visible'
-			$ZircoliteRulesComboBox.Visibility = 'Visible'
-			$ZircoliteTemplates.Visibility = 'Visible'
-			$ZircoliteTemplatesComboBox.Visibility = 'Visible'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Visible'
-			$ZircoliteStartDate.Visibility = 'Visible'
-			$ZircoliteStartDatePicker.Visibility = 'Visible'
-			$ZircoliteEndDate.Visibility = 'Visible'
-			$ZircoliteEndDatePicker.Visibility = 'Visible'
-			$ZircoliteTextBlock.Visibility = 'Visible'
-			$UpdateZircoliteButton.Visibility = 'Visible'
-			$ZircolitepackageCheckBox.Visibility = 'Visible'
-			$ZircolitesysmonCheckBox.Visibility = 'Visible'
+    Set-ProcessingControlVisibility -Controls $allProcessingToolControls -Visibility 'Collapsed'
 
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$ProcessTimelineArtifactsButton.Visibility = 'Collapsed'
-			$IncludeChainsaw.Visibility = 'Collapsed'
-			$IncludeHayabusa.Visibility = 'Collapsed'
-			$IncludeZimmerman.Visibility = 'Collapsed'
-			$IncludeZircolite.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$ExportTimelineArtifactsButton.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDate.Visibility = 'Collapsed'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDate.Visibility = 'Collapsed'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Collapsed'
-			$TimelineArtifactTextBlock.Visibility = 'Collapsed'
-			$sqlitePathTextBox.Visibility = 'Collapsed'
-			$BrowsesqlitePathButton.Visibility = 'Collapsed'
-			$TimelineDateRangeCheckBox.Visibility = 'Collapsed'
-			$TimelineDateIOCCheckBox.Visibility = 'Collapsed'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Collapsed'
-        }
-        "Timeline Artifacts" {
-            # Show Timeline Artifacts controls
-			$ProcessTimelineArtifactsButton.Visibility = 'Visible'
-			$IncludeChainsaw.Visibility = 'Visible'
-			$IncludeHayabusa.Visibility = 'Visible'
-			$IncludeZimmerman.Visibility = 'Visible'
-			$IncludeZircolite.Visibility = 'Visible'
-			$TimelineArtifactTextBlock.Visibility = 'Visible'
-			$ExportTimelineArtifactsButton.Visibility = 'Visible'
-			$TimelineArtifactsStartDate.Visibility = 'Visible'
-			$TimelineArtifactsStartDatePicker.Visibility = 'Visible'
-			$TimelineArtifactsEndDate.Visibility = 'Visible'
-			$TimelineArtifactsEndDatePicker.Visibility = 'Visible'
-			$TimelineArtifactTextBlock.Visibility = 'Visible'
-			$sqlitePathTextBox.Visibility = 'Visible'
-			$BrowsesqlitePathButton.Visibility = 'Visible'
-			$ProcessToolLocation.Visibility = 'Visible'
-			$TimelineDateRangeCheckBox.Visibility = 'Visible'
-			$TimelineDateIOCCheckBox.Visibility = 'Visible'
-			$OpenCustomTimelineIOCsButton.Visibility = 'Visible'
-			
-            # Hide other controls
-            $ProcessBulkExtractorButton.Visibility = 'Collapsed'
-			$BulkExtractorPathTextBox.Visibility = 'Collapsed'
-			$BrowseBulkExtractorPathButton.Visibility = 'Collapsed'
-			$ProcessToolExtraArguments.Visibility = 'Collapsed'
-			$BulkTextBlock.Visibility = 'Collapsed'
-            $ProcessZimmermanButton.Visibility = 'Collapsed'
-            $ZimmermanTextBlock.Visibility = 'Collapsed'
-			$UpdateZimmermanButton.Visibility = 'Collapsed'
-            $ZtoolsComboBox.Visibility = 'Collapsed'
-			$ZimmermanPathTextBox.Visibility = 'Collapsed'
-			$BrowseZimmermanPathButton.Visibility = 'Collapsed'
-			$GeoLocateButton.Visibility = 'Collapsed'
-			$GeoLite2CityDBPathTextBox.Visibility = 'Collapsed'
-			$BrowseGeoLite2CityDBPathButton.Visibility = 'Collapsed'
-			$GeolocateTextBlock.Visibility = 'Collapsed'
-			$CheckVirusTotal.Visibility = 'Collapsed'
-			$Process7zipButton.Visibility = 'Collapsed'
-			$SevenzipPathTextBox.Visibility = 'Collapsed'
-			$Browse7zipPathButton.Visibility = 'Collapsed'
-			$sevenzipTextBlock.Visibility = 'Collapsed'
-			$ProcessPlasoButton.Visibility = 'Collapsed'
-			$PlasoPathTextBox.Visibility = 'Collapsed'
-			$BrowsePlasoPathButton.Visibility = 'Collapsed'
-			$PlasoDateRangeCheckBox.Visibility = 'Collapsed'
-			$PlasoStartDate.Visibility = 'Collapsed'
-			$PlasoStartDatePicker.Visibility = 'Collapsed'
-			$PlasoEndDate.Visibility = 'Collapsed'
-			$PlasoEndDatePicker.Visibility = 'Collapsed'
-			$PsortOnlyCheckBox.Visibility = 'Collapsed'
-			$PlasoTextBlock.Visibility = 'Collapsed'
-			$ProcessHayabusaButton.Visibility = 'Collapsed'
-			$HayabusaPathTextBox.Visibility = 'Collapsed'
-			$BrowseHayabusaPathButton.Visibility = 'Collapsed'
-			$HayabusaDateRangeCheckBox.Visibility = 'Collapsed'
-			$HayabusaStartDate.Visibility = 'Collapsed'
-			$HayabusaStartDatePicker.Visibility = 'Collapsed'
-			$HayabusaEndDate.Visibility = 'Collapsed'
-			$HayabusaEndDatePicker.Visibility = 'Collapsed'
-			$HayabusaGeoDBCheckBox.Visibility = 'Collapsed'
-			$HayabusaTextBlock.Visibility = 'Collapsed'
-			$ProcessChainsawButton.Visibility = 'Collapsed'
-			$ChainsawPathTextBox.Visibility = 'Collapsed'
-			$BrowseChainsawPathButton.Visibility = 'Collapsed'
-			$ChainsawJson.Visibility = 'Collapsed'
-			$ChawnsawTextBlock.Visibility = 'Collapsed'
-			$ProcessZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitePathTextBox.Visibility = 'Collapsed'
-			$BrowseZircolitePathButton.Visibility = 'Collapsed'
-			$ZircolitejsonCheckBox.Visibility = 'Collapsed'
-			$ZircoliteRules.Visibility = 'Collapsed'
-			$ZircoliteRulesComboBox.Visibility = 'Collapsed'
-			$ZircoliteTemplates.Visibility = 'Collapsed'
-			$ZircoliteTemplatesComboBox.Visibility = 'Collapsed'
-			$ZircoliteDateRangeCheckBox.Visibility = 'Collapsed'
-			$ZircoliteStartDate.Visibility = 'Collapsed'
-			$ZircoliteStartDatePicker.Visibility = 'Collapsed'
-			$ZircoliteEndDate.Visibility = 'Collapsed'
-			$ZircoliteEndDatePicker.Visibility = 'Collapsed'
-			$ZircoliteTextBlock.Visibility = 'Collapsed'
-			$UpdateZircoliteButton.Visibility = 'Collapsed'
-			$ZircolitepackageCheckBox.Visibility = 'Collapsed'
-			$ZircolitesysmonCheckBox.Visibility = 'Collapsed'
-        }
+    if (-not [string]::IsNullOrWhiteSpace($selectedTool) -and $processingToolControlSets.ContainsKey($selectedTool)) {
+        Set-ProcessingControlVisibility -Controls $processingToolControlSets[$selectedTool] -Visibility 'Visible'
     }
 })
 ####End System processing event handlers####
@@ -3574,62 +2907,41 @@ $BrowseclamAVUpdatePathButton.Add_Click({
     }
 })
 
-$ThreatScanToolComboBox.Add_SelectionChanged({
-    switch ($ThreatScanToolComboBox.SelectedItem.Content) {
-        "ClamAV" {
-            # Show ClamAV controls
-            $ScanToolLocation.Visibility = 'Visible'
-			$ScanningToolExtraArguments.Visibility = 'Visible'
-			$ScanClamAVButton.Visibility = 'Visible'
-			$ClamAVPathTextBox.Visibility = 'Visible'
-			$BrowseClamAVPathButton.Visibility = 'Visible'
-			$ClamAVTextBlock.Visibility = 'Visible'
-			$UpdateclamAVButton.Visibility = 'Visible'
-			$clamAVUpdaterPathTextBox.Visibility = 'Visible'
-			$BrowseclamAVUpdatePathButton.Visibility = 'Visible'
-			$FreshclamLocation.Visibility = 'Visible'			
-            # Hide other controls
-			$LokiPathTextBox.Visibility = 'Collapsed'
-			$BrowseLokiPathButton.Visibility = 'Collapsed'
-			$LokiTextBlock.Visibility = 'Collapsed'
-			$ScanLokiButton.Visibility = 'Collapsed'
-			$ProcscanCheckbox.Visibility = 'Collapsed'
-			$IntenseScanCheckbox.Visibility = 'Collapsed'
-			$VulnchecksCheckbox.Visibility = 'Collapsed'	
-			$UpdateLokiButton.Visibility = 'Collapsed'
-			$LokiUpdaterPathTextBox.Visibility = 'Collapsed'
-			$BrowseLokiUpdatePathButton.Visibility = 'Collapsed'	
-			$LokiUpgraderLocation.Visibility = 'Collapsed'			
-        }
-        "Loki" {
+$threatScannerControlSets = @{
+    "ClamAV" = @(
+        $ScanToolLocation, $ScanningToolExtraArguments,
+        $ScanClamAVButton, $ClamAVPathTextBox, $BrowseClamAVPathButton, $ClamAVTextBlock,
+        $UpdateclamAVButton, $clamAVUpdaterPathTextBox, $BrowseclamAVUpdatePathButton, $FreshclamLocation
+    )
+    "Loki" = @(
+        $ScanToolLocation, $ScanningToolExtraArguments,
+        $ScanLokiButton, $LokiPathTextBox, $BrowseLokiPathButton, $LokiTextBlock,
+        $ProcscanCheckbox, $IntenseScanCheckbox, $VulnchecksCheckbox,
+        $UpdateLokiButton, $LokiUpdaterPathTextBox, $BrowseLokiUpdatePathButton, $LokiUpgraderLocation
+    )
+}
 
-            # Show Loki Controls			
-            $ScanToolLocation.Visibility = 'Visible'
-			$ScanningToolExtraArguments.Visibility = 'Visible'
-			$ScanLokiButton.Visibility = 'Visible'			
-			$LokiPathTextBox.Visibility = 'Visible'
-			$BrowseLokiPathButton.Visibility = 'Visible'
-			$LokiTextBlock.Visibility = 'Visible'
-			$ProcscanCheckbox.Visibility = 'Visible'
-			$IntenseScanCheckbox.Visibility = 'Visible'
-			$VulnchecksCheckbox.Visibility = 'Visible'
-			$UpdateLokiButton.Visibility = 'Visible'
-			$LokiUpdaterPathTextBox.Visibility = 'Visible'
-			$BrowseLokiUpdatePathButton.Visibility = 'Visible'			
-			$LokiUpgraderLocation.Visibility = 'Visible'	
-            # Hide other controls
-			$ClamAVPathTextBox.Visibility = 'Collapsed'
-			$BrowseClamAVPathButton.Visibility = 'Collapsed'
-			$ClamAVTextBlock.Visibility = 'Collapsed'	
-			$ScanClamAVButton.Visibility = 'Collapsed'	
-			$UpdateclamAVButton.Visibility = 'Collapsed'
-			$clamAVUpdaterPathTextBox.Visibility = 'Collapsed'
-			$BrowseclamAVUpdatePathButton.Visibility = 'Collapsed'
-			$FreshclamLocation.Visibility = 'Collapsed'				
-        }
+$allThreatScannerControls = @(
+    $ScanToolLocation, $ScanningToolExtraArguments,
+    $ScanClamAVButton, $ClamAVPathTextBox, $BrowseClamAVPathButton, $ClamAVTextBlock,
+    $UpdateclamAVButton, $clamAVUpdaterPathTextBox, $BrowseclamAVUpdatePathButton, $FreshclamLocation,
+    $ScanLokiButton, $LokiPathTextBox, $BrowseLokiPathButton, $LokiTextBlock,
+    $ProcscanCheckbox, $IntenseScanCheckbox, $VulnchecksCheckbox,
+    $UpdateLokiButton, $LokiUpdaterPathTextBox, $BrowseLokiUpdatePathButton, $LokiUpgraderLocation
+)
+
+$ThreatScanToolComboBox.Add_SelectionChanged({
+    $selectedTool = $null
+    if ($ThreatScanToolComboBox.SelectedItem -and $ThreatScanToolComboBox.SelectedItem.Content) {
+        $selectedTool = [string]$ThreatScanToolComboBox.SelectedItem.Content
+    }
+
+    Set-ProcessingControlVisibility -Controls $allThreatScannerControls -Visibility 'Collapsed'
+
+    if (-not [string]::IsNullOrWhiteSpace($selectedTool) -and $threatScannerControlSets.ContainsKey($selectedTool)) {
+        Set-ProcessingControlVisibility -Controls $threatScannerControlSets[$selectedTool] -Visibility 'Visible'
     }
 })
-
 $ScanClamAVButton.Add_Click({ScanClamAVButton_Click })
 $ScanLokiButton.Add_Click({ScanLokiButton_Click })
 $UpdateLokiButton.Add_Click({UpdateLokiButton_Click })
