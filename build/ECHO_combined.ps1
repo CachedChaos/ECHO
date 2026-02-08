@@ -7705,9 +7705,12 @@ function OnTabTabPageTools_GotFocus {
 
 function Add-ToolToCsv {
     param(
-        [string]$toolName
+        [string]$toolName,
+        [string]$filePath
     )
-    $filePath = Get-ChildItem -Path $toolsDirectory -Filter "$toolName" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    if ([string]::IsNullOrWhiteSpace($filePath)) {
+        $filePath = Get-ChildItem -Path $toolsDirectory -Filter "$toolName" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    }
 
     if ($null -ne $filePath -and (Test-Path $filePath)) {
         $csvPath = Join-Path $toolsDirectory "tools.csv"
@@ -8524,14 +8527,63 @@ function Download-Velociraptor {
     $tempFolder = Join-Path $toolsDirectory "TempVelociraptor"
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
-    # Get the latest release URL from GitHub API
-    $apiUrl = "https://api.github.com/repos/Velocidex/velociraptor/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^velociraptor-v.*amd64.exe$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    # ECHO currently depends on Velociraptor behavior that changed in 0.75+.
+    # Pin strictly to the newest stable 0.74 release line.
+    $allReleases = @()
+    for ($page = 1; $page -le 5; $page++) {
+        $apiUrl = "https://api.github.com/repos/Velocidex/velociraptor/releases?per_page=100&page=$page"
+        try {
+            $pageReleases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
+        } catch {
+            Update-Log "Failed to fetch Velociraptor releases: $_" "tabPageToolsTextBox"
+            return
+        }
+
+        if (-not $pageReleases -or $pageReleases.Count -eq 0) {
+            break
+        }
+
+        $allReleases += $pageReleases
+    }
+
+    $compatibleReleases = $allReleases | Where-Object {
+        -not $_.draft -and
+        -not $_.prerelease -and
+        ([string]$_.tag_name -match '^v?0\.74(\.\d+)?$')
+    }
+
+    if (-not $compatibleReleases -or $compatibleReleases.Count -eq 0) {
+        Update-Log "No compatible Velociraptor 0.74.x release found on GitHub." "tabPageToolsTextBox"
+        return
+    }
+
+    $selectedRelease = $compatibleReleases | Sort-Object -Descending -Property @{
+        Expression = {
+            $tag = [string]$_.tag_name
+            if ($tag -match '^v?0\.74(?:\.(\d+))?$') {
+                if ($matches[1]) { return [int]$matches[1] }
+                return 0
+            }
+            return -1
+        }
+    } | Select-Object -First 1
+
+    $downloadAsset = $selectedRelease.assets | Where-Object {
+        $_.name -match '^velociraptor-v0\.74(\.\d+)?[^\\\/]*amd64\.exe$'
+    } | Select-Object -First 1
+
+    if (-not $downloadAsset) {
+        $downloadAsset = $selectedRelease.assets | Where-Object {
+            $_.name -match 'amd64\.exe$'
+        } | Select-Object -First 1
+    }
+
+    $downloadUrl = if ($downloadAsset) { $downloadAsset.browser_download_url } else { $null }
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
-		Update-Log "Download URL for Velociraptor.exe not found." "tabPageToolsTextBox"
+		Update-Log "Download URL for Velociraptor.exe not found in release $($selectedRelease.tag_name)." "tabPageToolsTextBox"
 		return
 	}
+    Update-Log "Downloading Velociraptor $($selectedRelease.tag_name) (pinned to 0.74.x for current ECHO compatibility)." "tabPageToolsTextBox"
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
@@ -8795,16 +8847,16 @@ $executableDirectory = [System.AppDomain]::CurrentDomain.BaseDirectory
 #$executableDirectory = Split-Path -Parent $PSCommandPath
 $toolsDirectory = Join-Path -Path $executableDirectory -ChildPath "Tools"
 
-function Is-Admin {
-    $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
-    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Test-AdminRights {
+	$currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
+	return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 # Restart script with administrator rights if not already running as admin
-if (-not (Is-Admin)) {
-    $scriptPath = $MyInvocation.MyCommand.Definition
-    Start-Process PowerShell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
-    exit
+if (-not (Test-AdminRights)) {
+	$scriptPath = $MyInvocation.MyCommand.Definition
+	Start-Process PowerShell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
+	exit
 }
 
 # Check if cases.csv exists, and create it if it doesn't
@@ -8822,6 +8874,175 @@ function Check-PythonInstalled {
     }
 }
 
+function Get-CaseMetadataPath {
+    param(
+        [string]$CaseDirectory,
+        [string]$CaseName
+    )
+    return (Join-Path -Path $CaseDirectory -ChildPath ("_ECHO.{0}.json" -f $CaseName))
+}
+
+function Get-CaseLogPath {
+    param(
+        [string]$CaseDirectory,
+        [string]$CaseName
+    )
+    return (Join-Path -Path $CaseDirectory -ChildPath ("{0}.log" -f $CaseName))
+}
+
+function Get-CaseLegacyTextPath {
+    param(
+        [string]$CaseDirectory,
+        [string]$CaseName
+    )
+    return (Join-Path -Path $CaseDirectory -ChildPath ("{0}.txt" -f $CaseName))
+}
+
+function Ensure-CaseFiles {
+    param(
+        [string]$CaseDirectory,
+        [string]$CaseName,
+        [Nullable[DateTime]]$CreatedDate
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CaseDirectory) -or [string]::IsNullOrWhiteSpace($CaseName)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $CaseDirectory -PathType Container)) {
+        return $false
+    }
+
+    $metadataPath = Get-CaseMetadataPath -CaseDirectory $CaseDirectory -CaseName $CaseName
+    $logPath = Get-CaseLogPath -CaseDirectory $CaseDirectory -CaseName $CaseName
+    $legacyTextPath = Get-CaseLegacyTextPath -CaseDirectory $CaseDirectory -CaseName $CaseName
+    $migratedFromLegacy = $false
+
+    if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) {
+        if (Test-Path -LiteralPath $legacyTextPath -PathType Leaf) {
+            try {
+                Move-Item -LiteralPath $legacyTextPath -Destination $logPath -Force
+                $migratedFromLegacy = $true
+            } catch {
+                try {
+                    Copy-Item -LiteralPath $legacyTextPath -Destination $logPath -Force
+                    Remove-Item -LiteralPath $legacyTextPath -Force
+                    $migratedFromLegacy = $true
+                } catch {
+                    return $false
+                }
+            }
+        } else {
+            New-Item -ItemType File -Path $logPath | Out-Null
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+        $resolvedCreatedDate = if ($CreatedDate.HasValue) { $CreatedDate.Value } else { Get-Date }
+        $metadata = [ordered]@{
+            schema = "ECHO.CaseMetadata"
+            schemaVersion = 1
+            caseName = $CaseName
+            caseDirectory = $CaseDirectory
+            createdLocal = $resolvedCreatedDate.ToString("o")
+            createdUtc = $resolvedCreatedDate.ToUniversalTime().ToString("o")
+            createdBy = [Environment]::UserName
+            machineName = [Environment]::MachineName
+            logFile = [System.IO.Path]::GetFileName($logPath)
+            metadataFile = [System.IO.Path]::GetFileName($metadataPath)
+            migratedFromLegacyText = $migratedFromLegacy
+            tool = "ECHO"
+            entryPoint = [System.IO.Path]::GetFileName($PSCommandPath)
+        }
+        $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+    }
+
+    return $true
+}
+
+function Get-CurrentCaseLogPath {
+    param()
+
+    if ([string]::IsNullOrWhiteSpace($Global:CurrentCaseDirectory)) {
+        return $null
+    }
+
+    try {
+        $caseDirectory = $Global:CurrentCaseDirectory.Trim()
+        if (-not (Test-Path -LiteralPath $caseDirectory -PathType Container)) {
+            return $null
+        }
+
+        $caseName = (Get-Item -LiteralPath $caseDirectory).Name
+        $metadataFile = Get-ChildItem -LiteralPath $caseDirectory -Filter "_ECHO.*.json" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($metadataFile) {
+            try {
+                $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw | ConvertFrom-Json
+                if ($metadata -and -not [string]::IsNullOrWhiteSpace([string]$metadata.caseName)) {
+                    $caseName = [string]$metadata.caseName
+                }
+            } catch {
+                # Fall back to directory name if metadata parsing fails.
+            }
+        }
+
+        $caseLogPath = Get-CaseLogPath -CaseDirectory $caseDirectory -CaseName $caseName
+        if (Test-Path -LiteralPath $caseLogPath -PathType Leaf) {
+            return $caseLogPath
+        }
+
+        $legacyTextPath = Get-CaseLegacyTextPath -CaseDirectory $caseDirectory -CaseName $caseName
+        if (Test-Path -LiteralPath $legacyTextPath -PathType Leaf) {
+            return $legacyTextPath
+        }
+
+        return $caseLogPath
+    } catch {
+        return $null
+    }
+}
+
+function Write-CaseLogLine {
+    param(
+        [string]$LogLine
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LogLine)) {
+        return
+    }
+
+    $caseLogPath = Get-CurrentCaseLogPath
+    if ([string]::IsNullOrWhiteSpace($caseLogPath)) {
+        return
+    }
+
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try {
+            $stream = [System.IO.File]::Open($caseLogPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+            $writer = $null
+            try {
+                $writer = New-Object System.IO.StreamWriter($stream)
+                $writer.WriteLine($LogLine)
+                $writer.Flush()
+            } finally {
+                if ($writer -ne $null) {
+                    $writer.Dispose()
+                }
+                if ($stream -ne $null) {
+                    $stream.Dispose()
+                }
+            }
+            return
+        } catch {
+            if ($attempt -eq 2) {
+                Write-Host "Failed to write case log line: $_"
+            } else {
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
+}
+
 function Exit-Program {
     param()
 
@@ -8835,30 +9056,21 @@ function Exit-Program {
         $Global:PipeServerJob = $null
     }
 
-    # Attempt to stop transcription
-    try {
-        Stop-Transcript
-        # Wait for the transcript to fully stop
-        Start-Sleep -Seconds 2
-    } catch {
-        [System.Windows.MessageBox]::Show("Transcription already stopped or not started.")
-    }
-    
     if ($Global:CurrentCaseDirectory -ne $null) {
         $caseName = (Get-Item $Global:CurrentCaseDirectory).Name
         $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-        $newFileName = "{0}_{1}.txt" -f $date, $caseName
+        $newFileName = "{0}_{1}.log" -f $date, $caseName
 
         $transcriptLogsPath = Join-Path $Global:CurrentCaseDirectory "Transcript_Logs"
         if (!(Test-Path $transcriptLogsPath)) {
             New-Item -ItemType Directory -Path $transcriptLogsPath | Out-Null
         }
 
-        $transcriptFile = "$Global:CurrentCaseDirectory\$caseName.txt"
-        if (Test-Path $transcriptFile) {
+        $caseLogFile = Get-CurrentCaseLogPath
+        if (Test-Path -LiteralPath $caseLogFile -PathType Leaf) {
             # Prepare the new file path with timestamp
             $newFilePath = Join-Path $transcriptLogsPath $newFileName
-            Copy-Item -Path $transcriptFile -Destination $newFilePath
+            Copy-Item -Path $caseLogFile -Destination $newFilePath
 
             # Archive file name
             $archiveFileName = "$caseName.zip"
@@ -8879,12 +9091,11 @@ function Exit-Program {
                 Compress-Archive -Path $newFilePath -DestinationPath $archivePath | Out-Null
             }
 			Remove-Item -Path $newFilePath -Force
-            Clear-Content -Path $transcriptFile -Force
+            Clear-Content -Path $caseLogFile -Force
         }
     }
 
     # Clear global variables
-    Set-Variable -Name "Global:CurrentCaseName" -Value $null > $null
     Set-Variable -Name "Global:CurrentCaseDirectory" -Value $null > $null
     [void]$window.Close()
 }
@@ -8906,15 +9117,17 @@ function New-Case {
 			Created = (Get-Date)
         }
         $CaseInfo | Export-Csv -Path "$executableDirectory\cases.csv" -NoTypeInformation -Append
-        Update-Log "Case '$CaseName' created successfully in '$CaseDirectory'." "caseCreationLogTextBox"		
+        Update-Log "Case '$CaseName' created successfully in '$CaseDirectory'." "caseCreationLogTextBox"
+
+        if (Ensure-CaseFiles -CaseDirectory $CaseDirectory -CaseName $CaseName -CreatedDate ([Nullable[DateTime]](Get-Date))) {
+            Update-Log "Case files created: '_ECHO.$CaseName.json' and '$CaseName.log'." "caseCreationLogTextBox"
+        } else {
+            Update-Log "Failed to initialize case files for '$CaseName'." "caseCreationLogTextBox"
+        }
     }
     else {
         Update-Log "A case with the name '$CaseName' already exists in '$CaseLocation'." "caseCreationLogTextBox"
     }
-	# Create text file in case directory
-    $TextFilePath = Join-Path $CaseDirectory "$CaseName.txt"
-    New-Item -ItemType File -Path $TextFilePath | Out-Null
-    Update-Log "Text file '$CaseName.txt' created in case directory." "caseCreationLogTextBox"
 	return
 }
 
@@ -8940,11 +9153,11 @@ function Get-Cases {
         return @()
     }
 
-    # Import cases from CSV and clean up whitespace
+    # Import cases from CSV and clean up whitespace safely.
     $Cases = Import-Csv -Path "$executableDirectory\cases.csv" | ForEach-Object {
         [PSCustomObject]@{
-            Name    = $_.Name.Trim()
-            Path    = $_.Path.Trim()
+            Name    = if ($null -eq $_.Name) { "" } else { "$($_.Name)".Trim() }
+            Path    = if ($null -eq $_.Path) { "" } else { "$($_.Path)".Trim() }
             Created = $_.Created
         }
     }
@@ -8952,19 +9165,52 @@ function Get-Cases {
     return $Cases
 }
 
+function Test-CaseRecordIsUsable {
+    param(
+        [string]$CaseName,
+        [string]$CasePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CaseName) -or [string]::IsNullOrWhiteSpace($CasePath)) {
+        return $false
+    }
+
+    try {
+        $normalizedPath = $CasePath.Trim()
+        if (-not (Test-Path -LiteralPath $normalizedPath -PathType Container)) {
+            return $false
+        }
+
+        $metadataPath = Get-CaseMetadataPath -CaseDirectory $normalizedPath -CaseName $CaseName
+        $logPath = Get-CaseLogPath -CaseDirectory $normalizedPath -CaseName $CaseName
+        $legacyTextPath = Get-CaseLegacyTextPath -CaseDirectory $normalizedPath -CaseName $CaseName
+
+        if ((Test-Path -LiteralPath $metadataPath -PathType Leaf) -and (Test-Path -LiteralPath $logPath -PathType Leaf)) {
+            return $true
+        }
+
+        if (Test-Path -LiteralPath $legacyTextPath -PathType Leaf) {
+            return $true
+        }
+
+        if (Test-Path -LiteralPath $logPath -PathType Leaf) {
+            return $true
+        }
+
+        return $false
+    } catch {
+        return $false
+    }
+}
+
 function Open-Case {
     param(
-        [string]$CaseName
+        [string]$CaseName,
+        [string]$CasePath
     )
 
     # If a case is already open, close and archive its transcript
     if ($Global:CurrentCaseDirectory) {
-        try {
-            Stop-Transcript
-        } catch {
-            [System.Windows.MessageBox]::Show("Error stopping current transcript. It may have been already stopped.")
-        }
-
         # Archive transcript file
         try {
             $currentCaseName = (Get-Item $Global:CurrentCaseDirectory).Name
@@ -8974,12 +9220,12 @@ function Open-Case {
                 New-Item -ItemType Directory -Path $transcriptLogsPath | Out-Null
             }
 
-            $transcriptFile = Join-Path $Global:CurrentCaseDirectory "$currentCaseName.txt"
-            if (Test-Path $transcriptFile) {
+            $caseLogFile = Get-CurrentCaseLogPath
+            if (Test-Path -LiteralPath $caseLogFile -PathType Leaf) {
                 # Prepare the new file path with timestamp
-                $newFileName = "{0}_{1}.txt" -f $date, $currentCaseName
+                $newFileName = "{0}_{1}.log" -f $date, $currentCaseName
                 $newFilePath = Join-Path $transcriptLogsPath $newFileName
-                Copy-Item -Path $transcriptFile -Destination $newFilePath
+                Copy-Item -Path $caseLogFile -Destination $newFilePath
 
                 # Archive file name
                 $archiveFileName = "$currentCaseName.zip"
@@ -8997,7 +9243,7 @@ function Open-Case {
                 } else {
                     Compress-Archive -Path $newFilePath -DestinationPath $archivePath -Force | Out-Null
                 }
-                Clear-Content -Path $transcriptFile -Force
+                Clear-Content -Path $caseLogFile -Force
             }
         } catch {
             [System.Windows.MessageBox]::Show("An error occurred during transcript archiving: $_")
@@ -9012,24 +9258,77 @@ function Open-Case {
 
     # Get the case details from the CSV file
     $Cases = @(Get-Cases)
-    $SelectedCase = $Cases | Where-Object { $_.Name -eq $CaseName }
+    $MatchingCases = @($Cases | Where-Object { $_.Name -eq $CaseName })
+
+    if (-not [string]::IsNullOrWhiteSpace($CasePath)) {
+        $normalizedRequestedPath = $CasePath.Trim()
+        $MatchingCases = @(
+            $MatchingCases | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.Path) -and $_.Path.Trim().ToLowerInvariant() -eq $normalizedRequestedPath.ToLowerInvariant()
+            }
+        )
+    }
 
     # Check if the selected case exists
-    if (-not $SelectedCase) {
+    if ($MatchingCases.Count -eq 0) {
         Update-Log "Case '$CaseName' not found in CSV file." "caseCreationLogTextBox"
         return
     }
 
-    # Construct case directory path and set global variable
-    $CaseDirectory = $SelectedCase.Path
+    # Handle duplicate case names by preferring the single usable record.
+    $SelectedCase = $null
+    if ($MatchingCases.Count -gt 1) {
+        $usableCases = @(
+            $MatchingCases | Where-Object {
+                Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path
+            }
+        )
 
-    if (Test-Path $CaseDirectory) {
-        Set-Variable -Name "Global:CurrentCaseName" -Value $SelectedCase.Name
-        if (-not (Test-Path "$CaseDirectory\$($SelectedCase.Name).txt")) {
-            New-Item -ItemType File -Path "$CaseDirectory\$($SelectedCase.Name).txt"
+        if ($usableCases.Count -eq 1) {
+            $SelectedCase = $usableCases[0]
+        } elseif ($usableCases.Count -gt 1) {
+            Update-Log "Multiple usable cases named '$CaseName' were found. Open from the case grid row instead." "caseCreationLogTextBox"
+            [System.Windows.MessageBox]::Show("Multiple cases named '$CaseName' are usable. Double-click the exact row in the case grid to open the correct one.", "Ambiguous Case", 'OK', 'Warning')
+            return
+        } else {
+            # Fall back to first match for a clear validation error below.
+            $SelectedCase = $MatchingCases[0]
         }
-        $TranscriptFile = Join-Path $CaseDirectory "$CaseName.txt"
-        Start-Transcript -Path $TranscriptFile -Append
+    } else {
+        $SelectedCase = $MatchingCases[0]
+    }
+
+    # Construct case directory path and validate case structure before opening
+    $CaseDirectory = $SelectedCase.Path
+    if (-not (Test-CaseRecordIsUsable -CaseName $SelectedCase.Name -CasePath $CaseDirectory)) {
+        Update-Log "Case '$($SelectedCase.Name)' is missing required files or has an invalid path." "caseCreationLogTextBox"
+        [System.Windows.MessageBox]::Show("Case '$($SelectedCase.Name)' is missing required files (`"_ECHO.$($SelectedCase.Name).json`" and/or `"$($SelectedCase.Name).log`") or has an invalid path.", "Case Invalid", 'OK', 'Error')
+        return
+    }
+
+    if (Test-Path -LiteralPath $CaseDirectory -PathType Container) {
+        $caseFilesReady = $false
+        if ($SelectedCase.Created) {
+            $createdDateValue = $null
+            try {
+                $createdDateValue = [DateTime]$SelectedCase.Created
+            } catch {
+                $createdDateValue = $null
+            }
+
+            if ($null -ne $createdDateValue) {
+                $caseFilesReady = Ensure-CaseFiles -CaseDirectory $CaseDirectory -CaseName $SelectedCase.Name -CreatedDate ([Nullable[DateTime]]$createdDateValue)
+            } else {
+                $caseFilesReady = Ensure-CaseFiles -CaseDirectory $CaseDirectory -CaseName $SelectedCase.Name -CreatedDate $null
+            }
+        } else {
+            $caseFilesReady = Ensure-CaseFiles -CaseDirectory $CaseDirectory -CaseName $SelectedCase.Name -CreatedDate $null
+        }
+        if (-not $caseFilesReady) {
+            Update-Log "Failed to initialize case files for '$($SelectedCase.Name)'." "caseCreationLogTextBox"
+            [System.Windows.MessageBox]::Show("Failed to initialize case files for '$($SelectedCase.Name)'.", "Case Initialization Error", 'OK', 'Error')
+            return
+        }
         Set-Variable -Name "Global:CurrentCaseDirectory" -Value $CaseDirectory
 		
         # Enable new tabs
@@ -9046,12 +9345,7 @@ function Open-Case {
 		$window.FindName("TabElasticSearch").IsEnabled = $true		
         $window.Title = "ECHO - Evidence Collection & Handling Orchestrator - $($SelectedCase.Name)"
 		$global:hasRunOnTabCollectMemory = $false
-		$global:hasRunOnTabProcessArtifacts = $false
-		$global:hasRunCollectPacketCaptur = $false
 		$global:hasRunOnTabCollectSystemArtifacts = $false
-		$global:hasRunOnTabCollectDiskImage = $false
-		$global:hasRunOnTabCollectM365 = $false
-		$global:hasRunOnTabCollectMemory = $false
 		$global:hasRunOnTabPageTools = $false
 		$global:hasRunOnTabSyncTools = $false
         Update-Log "Case '$($SelectedCase.Name)' opened successfully." "caseCreationLogTextBox"
@@ -9066,17 +9360,47 @@ function Import-Case {
     param()
 
     $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
-    $openFileDialog.Title = "Select the case.txt file to import"
-    $openFileDialog.Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*"
+    $openFileDialog.Title = "Select case metadata (_ECHO.<casename>.json) or legacy case file (<casename>.txt) to import"
+    $openFileDialog.Filter = "ECHO Case Metadata (_ECHO.*.json)|_ECHO.*.json|Legacy Case File (*.txt)|*.txt|All Files (*.*)|*.*"
 
     if ($openFileDialog.ShowDialog() -eq "OK") {
         $selectedFile = $openFileDialog.FileName
         $fileInfo = Get-Item $selectedFile
 
         if ($fileInfo) {
-            $caseName = [System.IO.Path]::GetFileNameWithoutExtension($selectedFile)
+            $caseName = $null
             $casePath = [System.IO.Path]::GetDirectoryName($selectedFile)
-            $caseCreated = $fileInfo.CreationTime
+            $caseCreated = [DateTime]$fileInfo.CreationTime
+
+            if ($fileInfo.Extension -ieq ".json") {
+                try {
+                    $metadata = Get-Content -LiteralPath $selectedFile -Raw | ConvertFrom-Json
+                    if ($metadata -and -not [string]::IsNullOrWhiteSpace([string]$metadata.caseName)) {
+                        $caseName = [string]$metadata.caseName
+                    }
+                    if ($metadata -and $metadata.createdLocal) {
+                        try {
+                            $caseCreated = [DateTime]$metadata.createdLocal
+                        } catch {
+                            # Keep the default creation date if metadata value cannot be parsed.
+                        }
+                    }
+                } catch {
+                    Update-Log "Invalid case metadata file: $_" "caseCreationLogTextBox"
+                    return
+                }
+            } else {
+                $caseName = [System.IO.Path]::GetFileNameWithoutExtension($selectedFile)
+            }
+
+            if ([string]::IsNullOrWhiteSpace($caseName)) {
+                $caseName = (Get-Item -LiteralPath $casePath).Name
+            }
+
+            if (-not (Ensure-CaseFiles -CaseDirectory $casePath -CaseName $caseName -CreatedDate ([Nullable[DateTime]]$caseCreated))) {
+                Update-Log "Failed to initialize case files for imported case '$caseName'." "caseCreationLogTextBox"
+                return
+            }
 
             $caseInfo = [PSCustomObject]@{
                 Name    = $caseName
@@ -9137,12 +9461,22 @@ function CreateCaseButton_Click {
 
 function OpenCaseButton_Click {
     # Get the selected case name from the ExistingCasesComboBox
-    $CaseName = $existingCasesComboBox.SelectedItem
-    if (-not $CaseName) {
+    $selectedItem = [string]$existingCasesComboBox.SelectedItem
+    if (-not $selectedItem) {
         [System.Windows.MessageBox]::Show("Please select a case from the dropdown.", "Error", "OK", "Error")
         return
     }
-    Open-Case -CaseName $CaseName
+
+    $selectedItem = $selectedItem -replace '\s+\(Missing\)$', ''
+    $selectionParts = $selectedItem -split '\s+\|\s+', 2
+    $CaseName = $selectionParts[0].Trim()
+    $CasePath = if ($selectionParts.Count -gt 1) { $selectionParts[1].Trim() } else { $null }
+
+    if (-not [string]::IsNullOrWhiteSpace($CasePath)) {
+        Open-Case -CaseName $CaseName -CasePath $CasePath
+    } else {
+        Open-Case -CaseName $CaseName
+    }
 }
 
 function RemoveCaseButton_Click {
@@ -9151,11 +9485,20 @@ function RemoveCaseButton_Click {
 
     if (-not [string]::IsNullOrWhiteSpace($selectedItem)) {
         # Remove "(Missing)" from the case name if present
-        $selectedCaseName = $selectedItem -replace '\s+\(Missing\)$', ''
+        $selectedItem = $selectedItem -replace '\s+\(Missing\)$', ''
+        $selectionParts = $selectedItem -split '\s+\|\s+', 2
+        $selectedCaseName = $selectionParts[0].Trim()
+        $selectedCasePath = if ($selectionParts.Count -gt 1) { $selectionParts[1].Trim() } else { $null }
 
         # Get cases from CSV
         $cases = Get-Cases
-        $remainingCases = $cases | Where-Object { $_.Name -ne $selectedCaseName }
+        if (-not [string]::IsNullOrWhiteSpace($selectedCasePath)) {
+            $remainingCases = $cases | Where-Object {
+                -not ($_.Name -eq $selectedCaseName -and $_.Path -eq $selectedCasePath)
+            }
+        } else {
+            $remainingCases = $cases | Where-Object { $_.Name -ne $selectedCaseName }
+        }
 
         # Update the cases.csv file
         $remainingCases | Export-Csv -Path "$executableDirectory\cases.csv" -NoTypeInformation -Force
@@ -9179,7 +9522,7 @@ function PopulateCaseControls {
 			Name    = $_.Name
 			Path    = $_.Path
 			Created = $_.Created
-			Status  = if (Test-Path $_.Path.Trim()) { "Exists" } else { "Missing" }
+			Status  = if (Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path) { "Exists" } else { "Missing" }
 		}
 	})
 
@@ -9190,7 +9533,7 @@ function PopulateCaseControls {
     $existingCasesComboBox.Items.Clear()
     foreach ($case in $cases) {
         $statusText = if ($case.Status -eq "Exists") { "" } else { " (Missing)" }
-        $displayText = "$($case.Name)$statusText" # Add "(Missing)" for cases that don't exist
+        $displayText = "$($case.Name) | $($case.Path)$statusText"
         [void]$existingCasesComboBox.Items.Add($displayText)
     }
 }
@@ -9219,11 +9562,34 @@ function Update-Log {
         default { $targetLog = $window.FindName("caseCreationLogTextBox") } # Default log box
     }
 
+    $rawMessage = if ($null -eq $message) { "" } else { [string]$message }
+    $messageLines = [System.Text.RegularExpressions.Regex]::Split($rawMessage, "\r\n|\n|\r")
+    $formattedLines = @()
+
+    foreach ($line in $messageLines) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $formattedLines += "[$timestamp] $line"
+    }
+
+    if ($formattedLines.Count -eq 0) {
+        return
+    }
+
     if ($targetLog -ne $null) {
-        $targetLog.AppendText("$message`r`n")
+        foreach ($formattedLine in $formattedLines) {
+            $targetLog.AppendText("$formattedLine`r`n")
+        }
         # Set the caret position to the end and scroll to it
         $targetLog.CaretIndex = $targetLog.Text.Length
         $targetLog.ScrollToEnd()
+    }
+
+    foreach ($formattedLine in $formattedLines) {
+        Write-CaseLogLine -LogLine $formattedLine
     }
 }
 
@@ -9285,7 +9651,7 @@ function Update-Log {
 					</StackPanel>
 					<StackPanel Orientation="Horizontal" Margin="0,0,0,10">
 						<Button x:Name="ImportCaseButton" Content="Import Case" Width="100" Margin="0,0,10,0" />
-						<TextBlock Text="You can select a &lt;casename&gt;.txt file from the root of a case directory to import it into cases.csv" TextWrapping="Wrap" VerticalAlignment="Center" />
+						<TextBlock Text="You can select _ECHO.&lt;casename&gt;.json (or legacy &lt;casename&gt;.txt) from the root of a case directory to import it into cases.csv" TextWrapping="Wrap" VerticalAlignment="Center" />
 					</StackPanel>
 				</StackPanel>
 
@@ -9897,13 +10263,13 @@ FLEXIBILITY AND CONTROL:
 The 'Case Management' tab is designed to streamline your digital forensic investigation workflow. Key functionalities include:
 
 CREATE NEW CASE:
-- Enter a case name and select a storage directory. The program will create a dedicated folder for your case, complete with a tracking file ('<casename>.txt') for logging activities.
+- Enter a case name and select a storage directory. The program will create a dedicated folder for your case, complete with metadata ('_ECHO.<casename>.json') and a case log file ('<casename>.log').
 
 MANAGE EXISTING CASES:
 - Access and manage your ongoing investigations. The 'Existing Cases' dropdown lets you open or delete cases. Deleting a case removes it from the program's records but doesn't delete the actual case folder.
 
 IMPORT CASE:
-- Easily integrate external cases into the program by importing a '<casename>.txt' file. This feature allows for seamless collaboration and case transfer.
+- Easily integrate external cases into the program by importing '_ECHO.<casename>.json' (or legacy '<casename>.txt'). This feature allows for seamless collaboration and case transfer.
 
 Note: Cases are tracked in the 'cases.csv' file, located in the same directory as the program, ensuring organized and accessible case data.
 "@
@@ -10125,12 +10491,12 @@ $casesDataGrid.Add_MouseDoubleClick({
         $selectedCaseName = $selectedCase.Name
         $CaseDirectory = $selectedCase.Path.Trim()
 
-        if (Test-Path $CaseDirectory) {
+        if (Test-CaseRecordIsUsable -CaseName $selectedCaseName -CasePath $CaseDirectory) {
             # Call Open-Case with the case name
-            Open-Case -CaseName $selectedCaseName
+            Open-Case -CaseName $selectedCaseName -CasePath $CaseDirectory
         } else {
-            # Show an error message if the directory doesn't exist
-            [System.Windows.MessageBox]::Show("The directory for case '$selectedCaseName' does not exist on disk.", "Error", 'OK', 'Error')
+            # Show an error message if the case is incomplete or path is invalid
+            [System.Windows.MessageBox]::Show("Case '$selectedCaseName' is missing required files (`"_ECHO.$selectedCaseName.json`" and/or `"$selectedCaseName.log`") or has an invalid path.", "Error", 'OK', 'Error')
         }
     } else {
         # Show a warning if no case is selected
