@@ -2612,7 +2612,7 @@ https://github.com/log2timeline/plaso
 SQLite is a C-language library that implements a small, fast, self-contained, high-reliability, full-featured, SQL database engine.
 
 Echo uses the SQLite database for storing parsed artifacts within the Timeline Artifacts option in the Process System Artifacts tab.
-WHen using Echo to download SQLite, the browser will open up where you must wait 10 seconds to save the file. Save the file to the temporary tools directory and then click the OK prompt in Echo. The name of the file should be saved as the default name of 'sqlite-netFx46-binary-bundle-x64-2015-1.0.118.0.zip'.
+When using Echo to download SQLite, the package is downloaded and processed automatically by the Tool Management tab.
 https://sqlite.org/
 "@
     "Velociraptor" = @"

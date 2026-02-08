@@ -2,7 +2,6 @@ $global:hasRunOnTabPageTools = $false
 
 #Timer for downloading tools
 $Global:tooldownloadJobs = @()
-$Global:activeToolDownloads = @{}
 $Global:toolDownloadStatuses = @{}
 $script:toolManagementScriptPath = Join-Path $PSScriptRoot "ToolManagement.ps1"
 $tooldownloadJobTimer = New-Object System.Windows.Forms.Timer
@@ -226,7 +225,6 @@ function Start-ToolDownloadJob {
         JobName = $SelectedOption
         DataAdded = $false
     }
-    $Global:activeToolDownloads[$SelectedOption] = $true
     Set-ToolDownloadStatus -ToolName $SelectedOption -StatusText ("Running (started {0})" -f (Get-Date -Format "HH:mm:ss"))
     $tooldownloadJobTimer.Start()
     Update-DownloadToolButtonState
@@ -273,9 +271,6 @@ function Check-tooldownloadJobStatus {
                 }
 
                 $job.DataAdded = $true
-                if ($Global:activeToolDownloads.ContainsKey($job.JobName)) {
-                    $Global:activeToolDownloads.Remove($job.JobName) | Out-Null
-                }
             }
 
             Remove-Job -Id $updatedJob.Id -Force -ErrorAction SilentlyContinue
@@ -504,7 +499,7 @@ function Download-BulkExtractor {
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Bulk Extractor: $_" "tabPageToolsTextBox"
-        return
+        throw
     }
     Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
 
@@ -526,6 +521,7 @@ function Download-BulkExtractor {
         }
     } else {
         Update-Log "Downloaded BulkExtractor executable not found." "tabPageToolsTextBox"
+        throw "bulk_extractor64.exe not found after download/extraction."
     }
 
     # Clean up temporary folder
@@ -538,7 +534,7 @@ function Download-chainsaw {
 	# Check if $7zipPath is null or an empty string
 	if ([string]::IsNullOrWhiteSpace($7zipPath)) {
 		Update-Log "7-Zip is required to download this tool for the extraction piece, but is not found in the tools directory. Please download it first using the Tools Management page." "tabPageToolsTextBox"
-		return
+		throw "7-Zip (7za.exe) is required but was not found in the tools directory."
 	}
     $chainsawFolder = Join-Path $toolsDirectory "chainsaw"
     if (!(Test-Path $chainsawFolder)) {
@@ -781,7 +777,6 @@ function Download-Ftkimager {
 
 function Download-GeoLite2Databases {
     param(
-        [string]$zipPath,
         [System.Security.SecureString]$licenseKey
     )
 
@@ -790,7 +785,7 @@ function Download-GeoLite2Databases {
 	# Check if $zipPath is null or an empty string
 	if ([string]::IsNullOrWhiteSpace($zipPath)) {
 		Update-Log "7-Zip is required to download this tool for the extraction piece, but is not found in the tools directory. Please download it first using the Tools Management page." "tabPageToolsTextBox"
-		return
+		throw "7-Zip (7za.exe) is required but was not found in the tools directory."
 	}
     # Convert the secure string license key to plain text
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($licenseKey)
@@ -1060,7 +1055,7 @@ function Download-Plaso {
 	# Check if $7zipPath is null or an empty string
 	if ([string]::IsNullOrWhiteSpace($7zipPath)) {
 		Update-Log "7-Zip is required to download this tool for the extraction piece, but is not found in the tools directory. Please download it first using the Tools Management page." "tabPageToolsTextBox"
-		return
+		throw "7-Zip (7za.exe) is required but was not found in the tools directory."
 	}
 	
     $PlasoFolder = Join-Path $toolsDirectory "Plaso"
@@ -1110,11 +1105,12 @@ function Download-Plaso {
 			$newHash = (Get-FileHash -Path $log2timelinetempPY -Algorithm SHA256).Hash
 			$existingHash = if ($log2timelinePY) { (Get-FileHash -Path $log2timelinePY -Algorithm SHA256).Hash } else { "" }
 		
-			if (-not $log2timelinePY -or $newHash -ne $existingHash) {
-				Copy-Item -Path (Join-Path $tempFolder "*") -Destination $PlasoFolder -Recurse -Force
-				Add-ToolToCsv -toolName "log2timeline.py" -filePath $PlasoFolder
-				Update-Log "Plaso updated." "tabPageToolsTextBox"
-			} else {
+				if (-not $log2timelinePY -or $newHash -ne $existingHash) {
+					Copy-Item -Path (Join-Path $tempFolder "*") -Destination $PlasoFolder -Recurse -Force
+                    $copiedLog2timelinePath = Join-Path $PlasoFolder (Split-Path -Leaf $log2timelinetempPY)
+					Add-ToolToCsv -toolName "log2timeline.py" -filePath $copiedLog2timelinePath
+					Update-Log "Plaso updated." "tabPageToolsTextBox"
+				} else {
 				Update-Log "Plaso is already up-to-date." "tabPageToolsTextBox"
 			}
 		} else {
@@ -1125,70 +1121,60 @@ function Download-Plaso {
 }
 
 function Download-SQLite {
-
-    # Setup paths
     $SQLiteFolder = Join-Path $toolsDirectory "SQLite"
-    if (!(Test-Path $SQLiteFolder)) {
-        New-Item -ItemType Directory -Path $SQLiteFolder | Out-Null
-    }
     $tempFolder = Join-Path $toolsDirectory "TempSQLite"
-	    if (!(Test-Path $SQLiteFolder)) {
-        New-Item -ItemType Directory -Path $tempFolder | Out-Null
-    }
-	$downloadPath = Join-Path $tempFolder "sqlite-netFx46-binary-bundle-x64-2015-1.0.118.0.zip"
     $SQLiteUrl = "https://system.data.sqlite.org/downloads/1.0.118.0/sqlite-netFx46-binary-bundle-x64-2015-1.0.118.0.zip"
+    $downloadPath = Join-Path $tempFolder (Split-Path -Leaf $SQLiteUrl)
 
-    # Ensure directories exist
     if (!(Test-Path $SQLiteFolder)) {
         New-Item -ItemType Directory -Path $SQLiteFolder | Out-Null
     }
-    if (!(Test-Path $tempFolder)) {
-        New-Item -ItemType Directory -Path $tempFolder | Out-Null
+    New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
+
+    try {
+        Update-Log "Downloading SQLite package..." "tabPageToolsTextBox"
+        Invoke-WebRequest -UseBasicParsing -Uri $SQLiteUrl -OutFile $downloadPath -ErrorAction Stop
+    } catch {
+        Update-Log "Failed to download SQLite: $_" "tabPageToolsTextBox"
+        throw
     }
 
-    # Open the download URL in the default web browser (Edge)
-    Start-Process $SQLiteUrl
-
-    # Wait for the user to manually download the file
-    [System.Windows.MessageBox]::Show("Please wait for the download the be available in your browser, then save file to: $tempFolder. Click OK when done.")
-
-    # Check if the file was manually downloaded and placed in the temp folder
-    if (Test-Path $downloadPath) {
-        try {
-            # Extract the zip file
-            Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
-
-            # Identify the executable based on pattern
-            $extractedExecutable = Get-ChildItem -Path $tempFolder -Filter "System.Data.SQLite.dll" -Recurse | Select-Object -ExpandProperty FullName -First 1
-
-            if ($extractedExecutable) {
-                # Calculate hash of the downloaded executable
-                $newHash = (Get-FileHash -Path $extractedExecutable -Algorithm SHA256).Hash
-                $SQLiteExecutable = Get-ChildItem -Path $SQLiteFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-                $existingHash = if ($SQLiteExecutable -and (Test-Path $SQLiteExecutable)) { (Get-FileHash -Path $SQLiteExecutable -Algorithm SHA256).Hash } else { "" }
-
-                if (-not $SQLiteExecutable -or $newHash -ne $existingHash) {
-                    Remove-Item -Path $SQLiteFolder\* -Recurse -Force
-                    # Copy all contents from the temp folder to the SQLite folder
-                    Copy-Item -Path $tempFolder\* -Destination $SQLiteFolder -Recurse -Force
-                    $destinationPath = Join-Path $SQLiteFolder (Split-Path -Leaf $extractedExecutable)
-                    Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable) -filePath $destinationPath
-                    Update-Log "SQLite updated." "tabPageToolsTextBox"
-                } else {
-                    Update-Log "SQLite is already up-to-date." "tabPageToolsTextBox"
-                }
-            } else {
-                Update-Log "Downloaded SQLite executable not found in the extracted files." "tabPageToolsTextBox"
-            }
-        } catch {
-            Update-Log "An error occurred during extraction: $_" "tabPageToolsTextBox"
+    try {
+        if (-not (Test-Path $downloadPath)) {
+            Update-Log "Downloaded SQLite package not found." "tabPageToolsTextBox"
+            throw "SQLite package missing after download."
         }
-    } else {
-        Update-Log "Downloaded SQLite executable not found." "tabPageToolsTextBox"
-    }
 
-    # Cleanup: Delete the temporary folder
-    Remove-Item -Path $tempFolder -Recurse -Force
+        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
+        Remove-Item -Path $downloadPath -Force -ErrorAction SilentlyContinue
+
+        $extractedDll = Get-ChildItem -Path $tempFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+        if (-not $extractedDll) {
+            Update-Log "Downloaded SQLite DLL not found in extracted files." "tabPageToolsTextBox"
+            throw "System.Data.SQLite.dll not found in extracted package."
+        }
+
+        $newHash = (Get-FileHash -Path $extractedDll -Algorithm SHA256).Hash
+        $SQLiteExecutable = Get-ChildItem -Path $SQLiteFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+        $existingHash = if ($SQLiteExecutable -and (Test-Path $SQLiteExecutable)) { (Get-FileHash -Path $SQLiteExecutable -Algorithm SHA256).Hash } else { "" }
+
+        if (-not $SQLiteExecutable -or $newHash -ne $existingHash) {
+            Remove-Item -Path "$SQLiteFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
+            Copy-Item -Path "$tempFolder\*" -Destination $SQLiteFolder -Recurse -Force
+            $copiedDllPath = Get-ChildItem -Path $SQLiteFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+            if ($copiedDllPath) {
+                Add-ToolToCsv -toolName "System.Data.SQLite.dll" -filePath $copiedDllPath
+            }
+            Update-Log "SQLite updated." "tabPageToolsTextBox"
+        } else {
+            Update-Log "SQLite is already up-to-date." "tabPageToolsTextBox"
+        }
+    } catch {
+        Update-Log "SQLite processing failed: $_" "tabPageToolsTextBox"
+        throw
+    } finally {
+        Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Download-Velociraptor {  
@@ -1417,12 +1403,13 @@ function Download-ZimmermanTools {
             Add-ToolToCsv -toolName "Get-ZimmermanTools.ps1"
         }
 
-        # Run the Zimmerman Tools script regardless of hash change
-        $scriptPath = Join-Path $ZimmermanToolsFolder "Get-ZimmermanTools.ps1"
-        if (Test-Path $scriptPath) {
-            Start-Process "powershell.exe" -ArgumentList "-NoExit", "-File `"$scriptPath`" -Dest `"$ZimmermanToolsFolder`"" -WorkingDirectory $ZimmermanToolsFolder -NoNewWindow
-            Update-Log "ZimmermanTools script executed." "tabPageToolsTextBox"
-        }
+	        # Run the Zimmerman Tools script regardless of hash change
+	        $scriptPath = Join-Path $ZimmermanToolsFolder "Get-ZimmermanTools.ps1"
+	        if (Test-Path $scriptPath) {
+                $zimmermanArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Dest `"$ZimmermanToolsFolder`""
+                Invoke-ExternalProcessQuiet -FilePath "powershell.exe" -ArgumentList $zimmermanArgs -WorkingDirectory $ZimmermanToolsFolder -ErrorContext "ZimmermanTools script execution" -TimeoutSeconds 1800
+	            Update-Log "ZimmermanTools script executed." "tabPageToolsTextBox"
+	        }
     } else {
         Update-Log "Downloaded ZimmermanTools package not found." "tabPageToolsTextBox"
     }
@@ -1436,7 +1423,7 @@ function Download-Zircolite {
 	# Check if $7zipPath is null or an empty string
 	if ([string]::IsNullOrWhiteSpace($7zipPath)) {
 		Update-Log "7-Zip is required to download this tool for the extraction piece, but is not found in the tools directory. Please download it first using the Tools Management page." "tabPageToolsTextBox"
-		return
+		throw "7-Zip (7za.exe) is required but was not found in the tools directory."
 	}
     $ZircoliteFolder = Join-Path $toolsDirectory "Zircolite"
     if (!(Test-Path $ZircoliteFolder)) {
