@@ -2,6 +2,9 @@ $global:hasRunOnTabPageTools = $false
 
 #Timer for downloading tools
 $Global:tooldownloadJobs = @()
+$Global:activeToolDownloads = @{}
+$Global:toolDownloadStatuses = @{}
+$script:toolManagementScriptPath = Join-Path $PSScriptRoot "ToolManagement.ps1"
 $tooldownloadJobTimer = New-Object System.Windows.Forms.Timer
 $tooldownloadJobTimer.Interval = 2000
 $tooldownloadJobTimer.Add_Tick({
@@ -10,32 +13,289 @@ $tooldownloadJobTimer.Add_Tick({
 
 ####Starting functions for Tools Tab####
 
-function Check-tooldownloadJobStatus {	
-    # Initialize the completed job count
-    $completedCount = 0
-	
-    foreach ($job in $Global:tooldownloadJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Tool download completed: $($job.JobName)" "tabPageToolsTextBox"
-				Update-Log "Results in $($toolsDirectory)" "tabPageToolsTextBox"
-				Write-Host "$timestamp Tool download completed: $($job.JobName)"
-				$job.DataAdded = $true		
+function Test-ToolDownloadActive {
+    return @($Global:tooldownloadJobs | Where-Object {
+        $_.JobObject -and
+        ($_.JobObject.State -eq 'Running' -or $_.JobObject.State -eq 'NotStarted')
+    }).Count -gt 0
+}
+
+function Set-ToolDownloadStatus {
+    param(
+        [string]$ToolName,
+        [string]$StatusText
+    )
+
+    if ([string]::IsNullOrWhiteSpace($ToolName)) {
+        return
+    }
+
+    $Global:toolDownloadStatuses[$ToolName] = $StatusText
+}
+
+function Update-SelectedToolDownloadStatus {
+    if (-not $ToolDownloadStatusTextBlock) {
+        return
+    }
+
+    $selectedTool = $null
+    if ($ToolsSelectionComboBox -and $ToolsSelectionComboBox.SelectedItem -and $ToolsSelectionComboBox.SelectedItem.Content) {
+        $selectedTool = [string]$ToolsSelectionComboBox.SelectedItem.Content
+    }
+
+    if ([string]::IsNullOrWhiteSpace($selectedTool)) {
+        $ToolDownloadStatusTextBlock.Text = "Status: Idle"
+        return
+    }
+
+    if ($Global:toolDownloadStatuses.ContainsKey($selectedTool)) {
+        $ToolDownloadStatusTextBlock.Text = "Status: $($Global:toolDownloadStatuses[$selectedTool])"
+    } else {
+        $ToolDownloadStatusTextBlock.Text = "Status: Idle"
+    }
+}
+
+function Update-DownloadToolButtonState {
+    if (-not $DownloadToolButton) {
+        return
+    }
+
+    $hasSelection = $false
+    if ($ToolsSelectionComboBox -and $ToolsSelectionComboBox.SelectedItem -and $ToolsSelectionComboBox.SelectedItem.Content) {
+        $hasSelection = $true
+    }
+
+    $isBusy = Test-ToolDownloadActive
+    $DownloadToolButton.IsEnabled = $hasSelection -and (-not $isBusy)
+    if ($ToolsSelectionComboBox) {
+        $ToolsSelectionComboBox.IsEnabled = -not $isBusy
+    }
+    Update-SelectedToolDownloadStatus
+}
+
+function Invoke-ExternalProcessQuiet {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [AllowEmptyString()]
+        [string]$ArgumentList = "",
+        [string]$WorkingDirectory,
+        [string]$ErrorContext = "external process",
+        [int]$TimeoutSeconds = 600,
+        [switch]$UseShellExecuteHidden
+    )
+
+    $stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) ("ECHO_stdout_{0}.log" -f ([guid]::NewGuid().ToString("N")))
+    $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) ("ECHO_stderr_{0}.log" -f ([guid]::NewGuid().ToString("N")))
+
+    $process = $null
+    try {
+        $stdoutText = ""
+        $stderrText = ""
+        if ($UseShellExecuteHidden) {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $FilePath
+            $psi.Arguments = $ArgumentList
+            $psi.UseShellExecute = $true
+            $psi.CreateNoWindow = $true
+            $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+                $psi.WorkingDirectory = $WorkingDirectory
             }
-			$completedCount++
+
+            $process = [System.Diagnostics.Process]::Start($psi)
+            if (-not $process) {
+                throw ("{0} failed to start: {1}" -f $ErrorContext, $FilePath)
+            }
+        } else {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $FilePath
+            $psi.Arguments = $ArgumentList
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+                $psi.WorkingDirectory = $WorkingDirectory
+            }
+
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $psi
+            $started = $process.Start()
+            if (-not $started) {
+                throw ("{0} failed to start: {1}" -f $ErrorContext, $FilePath)
+            }
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
         }
-	}
-	
-    if ($completedCount -eq $Global:tooldownloadJobs.Count) {
-        Update-Log "All Tool download completed." "tabPageToolsTextBox"
+
+        $timeoutMs = [Math]::Max(1000, ($TimeoutSeconds * 1000))
+        if (-not $process.WaitForExit($timeoutMs)) {
+            try { $process.Kill() } catch {}
+            throw ("{0} timed out after {1} seconds." -f $ErrorContext, $TimeoutSeconds)
+        }
+        if (-not $UseShellExecuteHidden) {
+            [System.Threading.Tasks.Task]::WaitAll(@($stdoutTask, $stderrTask), 5000) | Out-Null
+            $stdoutText = $stdoutTask.Result
+            $stderrText = $stderrTask.Result
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stdoutText)) {
+            Set-Content -LiteralPath $stdoutPath -Value $stdoutText -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+            Set-Content -LiteralPath $stderrPath -Value $stderrText -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+
+        if ($process.ExitCode -ne 0) {
+            $stderrText = ""
+            if (Test-Path -LiteralPath $stderrPath) {
+                $stderrText = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue).Trim()
+            }
+            if ([string]::IsNullOrWhiteSpace($stderrText) -and (Test-Path -LiteralPath $stdoutPath)) {
+                $stderrText = (Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue).Trim()
+            }
+            throw ("{0} failed with exit code {1}. {2}" -f $ErrorContext, $process.ExitCode, $stderrText)
+        }
+    } finally {
+        if ($process) {
+            try { $process.Dispose() } catch {}
+        }
+        Remove-Item -LiteralPath $stdoutPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Start-ToolDownloadJob {
+    param(
+        [string]$SelectedOption,
+        [string]$GeoLiteLicenseKeyPlain
+    )
+
+    $job = Start-Job -ScriptBlock {
+        param($selectedTool, $toolsDir, $toolManagementPath, $geoLiteLicense)
+
+        function Update-Log {
+            param([string]$message, [string]$callerFunction)
+            if (-not [string]::IsNullOrWhiteSpace($message)) {
+                Write-Output $message
+            }
+        }
+
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+            $ProgressPreference = 'SilentlyContinue'
+            $VerbosePreference = 'SilentlyContinue'
+            $InformationPreference = 'SilentlyContinue'
+            $global:toolsDirectory = $toolsDir
+            . $toolManagementPath
+
+            switch ($selectedTool) {
+                "7zip" { Download-7zip }
+                "BulkExtractor" { Download-BulkExtractor }
+                "chainsaw" { Download-chainsaw }
+                "ClamAV" { Download-ClamAV }
+                "etl2pcapng" { Download-etl2pcapng }
+                "Ftkimager" { Download-Ftkimager }
+                "GeoLite2Databases" {
+                    if ([string]::IsNullOrWhiteSpace($geoLiteLicense)) {
+                        Update-Log "GeoLite2 City download cancelled or no license key entered." "tabPageToolsTextBox"
+                    } else {
+                        $secureLicenseKey = ConvertTo-SecureString $geoLiteLicense -AsPlainText -Force
+                        Download-GeoLite2Databases -licenseKey $secureLicenseKey
+                    }
+                }
+                "Hayabusa" { Download-Hayabusa }
+                "Loki" { Download-Loki }
+                "Plaso" { Download-Plaso }
+                "SQLite" { Download-SQLite }
+                "Velociraptor" { Download-Velociraptor }
+                "Volatility3" { Download-Volatility3 }
+                "winpmem" { Download-winpmem }
+                "ZimmermanTools" { Download-ZimmermanTools }
+                "Zircolite" { Download-Zircolite }
+                default { Update-Log "Unknown tool selection: $selectedTool" "tabPageToolsTextBox" }
+            }
+        } catch {
+            Write-Output ("Unhandled tool download error for {0}: {1}" -f $selectedTool, $_.Exception.Message)
+            throw
+        }
+    } -ArgumentList @($SelectedOption, $toolsDirectory, $script:toolManagementScriptPath, $GeoLiteLicenseKeyPlain)
+
+    $Global:tooldownloadJobs += [PSCustomObject]@{
+        JobObject = $job
+        JobName = $SelectedOption
+        DataAdded = $false
+    }
+    $Global:activeToolDownloads[$SelectedOption] = $true
+    Set-ToolDownloadStatus -ToolName $SelectedOption -StatusText ("Running (started {0})" -f (Get-Date -Format "HH:mm:ss"))
+    $tooldownloadJobTimer.Start()
+    Update-DownloadToolButtonState
+}
+
+function Check-tooldownloadJobStatus {
+    $remainingJobs = @()
+
+    foreach ($job in $Global:tooldownloadJobs) {
+        $updatedJob = Get-Job -Id $job.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $updatedJob) {
+            continue
+        }
+
+        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed" -or $updatedJob.State -eq "Stopped") {
+            if (-not $job.DataAdded) {
+                $jobOutput = @()
+                try {
+                    $jobOutput = @(Receive-Job -Id $updatedJob.Id -ErrorAction Stop | ForEach-Object { [string]$_ })
+                } catch {
+                    Update-Log ("Failed to read background output for {0}: {1}" -f $job.JobName, $_.Exception.Message) "tabPageToolsTextBox"
+                }
+                foreach ($line in $jobOutput) {
+                    if (-not [string]::IsNullOrWhiteSpace($line)) {
+                        Update-Log $line "tabPageToolsTextBox"
+                    }
+                }
+
+                if ($updatedJob.State -eq "Completed") {
+                    Update-Log "Tool download completed: $($job.JobName)" "tabPageToolsTextBox"
+                    Update-Log "Results in $($toolsDirectory)" "tabPageToolsTextBox"
+                    Set-ToolDownloadStatus -ToolName $job.JobName -StatusText ("Completed ({0})" -f (Get-Date -Format "HH:mm:ss"))
+                } else {
+                    $failureReason = $null
+                    if ($updatedJob.ChildJobs -and $updatedJob.ChildJobs.Count -gt 0) {
+                        $failureReason = $updatedJob.ChildJobs[0].JobStateInfo.Reason
+                    }
+                    if ($failureReason) {
+                        Update-Log "Tool download failed: $($job.JobName) - $failureReason" "tabPageToolsTextBox"
+                    } else {
+                        Update-Log "Tool download failed: $($job.JobName)" "tabPageToolsTextBox"
+                    }
+                    Set-ToolDownloadStatus -ToolName $job.JobName -StatusText ("Failed ({0})" -f (Get-Date -Format "HH:mm:ss"))
+                }
+
+                $job.DataAdded = $true
+                if ($Global:activeToolDownloads.ContainsKey($job.JobName)) {
+                    $Global:activeToolDownloads.Remove($job.JobName) | Out-Null
+                }
+            }
+
+            Remove-Job -Id $updatedJob.Id -Force -ErrorAction SilentlyContinue
+            continue
+        }
+
+        $remainingJobs += $job
+    }
+
+    $Global:tooldownloadJobs = $remainingJobs
+    if ($Global:tooldownloadJobs.Count -eq 0) {
         $tooldownloadJobTimer.Stop()
     }
+    Update-DownloadToolButtonState
 }
 
 function OnTabTabPageTools_GotFocus {
     if ($global:hasRunOnTabPageTools) {
+        Update-SelectedToolDownloadStatus
+        Update-DownloadToolButtonState
         return
     }    		
     # Create subdirectory if it doesn't exist
@@ -43,7 +303,9 @@ function OnTabTabPageTools_GotFocus {
         New-Item -ItemType Directory -Path $toolsDirectory | Out-Null
         Update-Log "Subdirectory 'Tools' created successfully." "tabPageToolsTextBox"
     }
-	$global:hasRunOnTabPageTools = $true
+		$global:hasRunOnTabPageTools = $true
+    Update-SelectedToolDownloadStatus
+    Update-DownloadToolButtonState
 }
 
 function Add-ToolToCsv {
@@ -110,6 +372,17 @@ function Test-InternetConnection {
 }
 
 function DownloadToolButton_Click {
+    if (-not $ToolsSelectionComboBox.SelectedItem -or -not $ToolsSelectionComboBox.SelectedItem.Content) {
+        Update-Log "Select a tool before starting download/update." "tabPageToolsTextBox"
+        return
+    }
+
+    if (Test-ToolDownloadActive) {
+        Update-Log "A tool download is already running. Wait for it to complete before starting another." "tabPageToolsTextBox"
+        Update-DownloadToolButtonState
+        return
+    }
+
     $selectedOption = $ToolsSelectionComboBox.SelectedItem.Content.ToString()
     # Check for Internet Connection
     if (-not (Test-InternetConnection)) {
@@ -117,24 +390,9 @@ function DownloadToolButton_Click {
         return
     }
 
-    Update-Log "Downloading $($selectedOption)..." "tabPageToolsTextBox"
-
-    switch ($selectedOption) {
-        "7zip" { Download-7zip }
-        "BulkExtractor" { Download-BulkExtractor }
-		"chainsaw" { Download-chainsaw }		
-		"ClamAV" { Download-ClamAV }		
-        "etl2pcapng" { Download-etl2pcapng }
-        "Ftkimager" { Download-Ftkimager }
-        "GeoLite2Databases" {
-            # Check if 7zip is available
-            $zipPath = Get-ChildItem -Path $toolsDirectory -Filter "7za.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-            if (-not $zipPath) {
-                Update-Log "7-Zip is required but not found in the tools directory. Please download it first using the Tools Management page." "tabPageToolsTextBox"
-                return
-            }
-
-            # Create a new form for license key input
+    $geoLiteLicenseKeyPlain = $null
+    if ($selectedOption -eq "GeoLite2Databases") {
+        # Create a new form for license key input
             $licenseKeyForm = New-Object System.Windows.Forms.Form
             $licenseKeyForm.Text = 'Enter GeoLite2 License Key'
             $licenseKeyForm.Size = New-Object System.Drawing.Size(500, 200)
@@ -159,23 +417,16 @@ function DownloadToolButton_Click {
             $result = $licenseKeyForm.ShowDialog()
 
             if ($result -eq [System.Windows.Forms.DialogResult]::OK -and $licenseKeyBox.Text) {
-                $secureLicenseKey = ConvertTo-SecureString $licenseKeyBox.Text -AsPlainText -Force
-                Download-GeoLite2Databases -zipPath $zipPath -licenseKey $secureLicenseKey
+                $geoLiteLicenseKeyPlain = $licenseKeyBox.Text
             } else {
                 Update-Log "GeoLite2 City download cancelled or no license key entered." "tabPageToolsTextBox"
+                return
             }
-        }
-		"Hayabusa" { Download-Hayabusa }
-		"Loki" { Download-Loki }		
-        "Plaso" { Download-Plaso }
-		"SQLite" { Download-SQLite }
-        "Velociraptor" { Download-Velociraptor }
-        "Volatility3" { Download-Volatility3 }
-        "winpmem" { Download-winpmem }
-        "ZimmermanTools" { Download-ZimmermanTools }
-        "Zircolite" { Download-Zircolite }			
-        # Add other cases for different tools
     }
+
+    Update-Log "Downloading $($selectedOption)..." "tabPageToolsTextBox"
+    Start-ToolDownloadJob -SelectedOption $selectedOption -GeoLiteLicenseKeyPlain $geoLiteLicenseKeyPlain
+    Update-SelectedToolDownloadStatus
 }
 
 function Download-7zip {
@@ -208,7 +459,12 @@ function Download-7zip {
     }
 
     # Extract 7z2301-extra.7z using 7zr.exe
-    Start-Process $7zrPath -ArgumentList "x `"$extra7zPath`" -o`"$tempFolder`" -y" -NoNewWindow -Wait
+    try {
+        Invoke-ExternalProcessQuiet -FilePath $7zrPath -ArgumentList "x `"$extra7zPath`" -o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext "7zr extraction for 7-Zip package"
+    } catch {
+        Update-Log "Failed to extract 7-Zip package: $_" "tabPageToolsTextBox"
+        throw
+    }
 
     # Check hash and update if necessary
     # Assuming you want to update if 7z.exe is not the latest version
@@ -311,41 +567,44 @@ function Download-chainsaw {
         Update-Log "Failed to download chainsaw: $_" "tabPageToolsTextBox"
         return
     }
-    if (Test-Path $downloadPath) {
-        # Extract the zip file
-		try {
-			# Use 7-Zip to extract the ZIP file
-			$7zipArgs = "x `"$downloadPath`" -o`"$tempFolder`" -y"
-			Start-Process $7zipPath -ArgumentList $7zipArgs -NoNewWindow -Wait -ErrorAction Stop
-		} catch {
-			Update-Log "Failed to extract chainsaw with 7-Zip: $_" "tabPageToolsTextBox"
-			return
-		}
+	    if (Test-Path $downloadPath) {
+	        # Extract the zip file
+			try {
+				$7zipArgs = "x `"$downloadPath`" -o`"$tempFolder`" -y"
+				Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs -WorkingDirectory $tempFolder -ErrorContext "7-Zip extraction (temp) for chainsaw"
+			} catch {
+				Update-Log "Failed to extract chainsaw with 7-Zip: $_" "tabPageToolsTextBox"
+				throw
+			}
 
         # Identify the executable based on pattern
         $extractedExecutable = Get-ChildItem -Path $tempFolder -Filter "chainsaw*.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
 
-        if ($extractedExecutable) {
-            # Calculate hash of the downloaded executable
-            $newHash = (Get-FileHash -Path $extractedExecutable -Algorithm SHA256).Hash
-            $existingHash = if ($chainsawExecutable -and (Test-Path $chainsawExecutable)) { (Get-FileHash -Path $chainsawExecutable -Algorithm SHA256).Hash } else { "" }
+	        if ($extractedExecutable) {
+	            # Calculate hash of the downloaded executable
+	            $newHash = (Get-FileHash -Path $extractedExecutable -Algorithm SHA256).Hash
+	            $existingHash = if ($chainsawExecutable -and (Test-Path $chainsawExecutable)) { (Get-FileHash -Path $chainsawExecutable -Algorithm SHA256).Hash } else { "" }
 
-            if (-not $chainsawExecutable -or $newHash -ne $existingHash) {
-				# Check and clear the chainsaw folder
-				if (Test-Path $chainsawFolder) {
-					Remove-Item -Path $chainsawFolder\* -Recurse -Force
-				}
-				# Use 7-Zip to extract the ZIP file directly into the chainsaw folder
+	            if (-not $chainsawExecutable -or $newHash -ne $existingHash) {
+					# Check and clear the chainsaw folder
+					if (Test-Path $chainsawFolder) {
+						Remove-Item -Path $chainsawFolder\* -Recurse -Force
+					}
+	                Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable)
+	            } else {
+	                Update-Log "chainsaw is already up-to-date." "tabPageToolsTextBox"
+	            }
+	            # Always refresh chainsaw package contents so rules are updated
 				$7zipArgs2 = "x `"$downloadPath`" -o`"$chainsawFolder`" -y"
-				Start-Process $7zipPath -ArgumentList $7zipArgs2 -NoNewWindow -Wait -ErrorAction Stop
-                Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable)
-                Update-Log "chainsaw updated." "tabPageToolsTextBox"
-            } else {
-                Update-Log "chainsaw is already up-to-date." "tabPageToolsTextBox"
-            }
-        } else {
-            Update-Log "Downloaded chainsaw executable not found in the extracted files." "tabPageToolsTextBox"
-        }
+				Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs2 -WorkingDirectory $chainsawFolder -ErrorContext "7-Zip extraction (final) for chainsaw"
+	            if (-not $chainsawExecutable -or $newHash -ne $existingHash) {
+	                Update-Log "chainsaw updated." "tabPageToolsTextBox"
+	            } else {
+	                Update-Log "chainsaw rules package refreshed." "tabPageToolsTextBox"
+	            }
+	        } else {
+	            Update-Log "Downloaded chainsaw executable not found in the extracted files." "tabPageToolsTextBox"
+	        }
     } else {
         Update-Log "Downloaded chainsaw executable not found." "tabPageToolsTextBox"
     }
@@ -360,6 +619,22 @@ function Download-ClamAV {
         New-Item -ItemType Directory -Path $ClamAVFolder | Out-Null
     }
     $ClamdscanExecutable = Get-ChildItem -Path $ClamAVFolder -Filter "clamdscan.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    $existingFreshclam = Get-ChildItem -Path $ClamAVFolder -Filter "freshclam.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+
+    # Existing install: prefer DB signature update in place and skip binary download.
+    if ($ClamdscanExecutable -and (Test-Path $ClamdscanExecutable) -and $existingFreshclam -and (Test-Path $existingFreshclam)) {
+        Update-Log "Existing ClamAV installation found. Updating ClamAV database..." "tabPageToolsTextBox"
+        try {
+            $freshclamDirectory = Split-Path $existingFreshclam
+            Invoke-ExternalProcessQuiet -FilePath $existingFreshclam -WorkingDirectory $freshclamDirectory -ArgumentList "" -ErrorContext "ClamAV database update (existing install)" -TimeoutSeconds 300 -UseShellExecuteHidden
+            Update-Log "ClamAV database updated." "tabPageToolsTextBox"
+        } catch {
+            Update-Log "Error updating ClamAV database: $_" "tabPageToolsTextBox"
+            throw
+        }
+        return
+    }
+
     $tempFolder = Join-Path $toolsDirectory "TempClamAV"
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
@@ -423,19 +698,21 @@ function Download-ClamAV {
     } else {
         Update-Log "Downloaded ClamAV zip file not found." "tabPageToolsTextBox"
     }
-	# Run freshclam to update the database
-	try {
-		$freshclamPath = Get-ChildItem -Path $ClamAVFolder -Filter "freshclam.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-		if (Test-Path $freshclamPath) {
-			$freshclamDirectory = Split-Path $freshclamPath
-			Start-Process -FilePath $freshclamPath -WorkingDirectory $freshclamDirectory -Wait -NoNewWindow
-			Update-Log "ClamAV database updated." "tabPageToolsTextBox"
-		} else {
-			Update-Log "freshclam.exe not found in ClamAV directory." "tabPageToolsTextBox"
+		# Run freshclam to update the database
+		try {
+			$freshclamPath = Get-ChildItem -Path $ClamAVFolder -Filter "freshclam.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+			if (Test-Path $freshclamPath) {
+                Update-Log "Updating ClamAV database..." "tabPageToolsTextBox"
+				$freshclamDirectory = Split-Path $freshclamPath
+				Invoke-ExternalProcessQuiet -FilePath $freshclamPath -WorkingDirectory $freshclamDirectory -ArgumentList "" -ErrorContext "ClamAV database update (post-download)" -TimeoutSeconds 300 -UseShellExecuteHidden
+				Update-Log "ClamAV database updated." "tabPageToolsTextBox"
+			} else {
+				Update-Log "freshclam.exe not found in ClamAV directory." "tabPageToolsTextBox"
+			}
+		} catch {
+			Update-Log "Error updating ClamAV database: $_" "tabPageToolsTextBox"
+            throw
 		}
-	} catch {
-		Update-Log "Error updating ClamAV database: $_" "tabPageToolsTextBox"
-	}
 
     Remove-Item -Path $tempFolder -Recurse -Force
 }
@@ -494,12 +771,6 @@ function Download-etl2pcapng {
 function Download-Ftkimager {
     $ftkImagerPath = Get-ChildItem -Path $toolsDirectory -Filter "ftkimager.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 
-    # Clear the log screen
-    $targetLog = $window.FindName("tabPageToolsTextBox")
-    if ($targetLog -ne $null) {
-        $targetLog.Clear()
-    }
-
     # Check if FTK Imager CLI exists
     if ($ftkImagerPath -and (Test-Path $ftkImagerPath)) {
         Update-Log "FTK Command line version found at $ftkImagerPath. This version is no longer supported by Exterro and cannot be updated." "tabPageToolsTextBox"
@@ -547,9 +818,19 @@ function Download-GeoLite2Databases {
         Invoke-WebRequest -UseBasicParsing -Uri $dbUrls[$db] -OutFile $downloadPath
 
         # Extract the downloaded database using 7zip
-        Start-Process $zipPath -ArgumentList "x `"$downloadPath`" -o`"$tempFolder`" -y" -NoNewWindow -Wait
+        try {
+            Invoke-ExternalProcessQuiet -FilePath $zipPath -ArgumentList "x `"$downloadPath`" -o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext ("7-Zip extraction (.tar.gz) for GeoLite2 {0}" -f $db)
+        } catch {
+            Update-Log ("Failed to extract GeoLite2 " + $db + " archive (.tar.gz): $_") "tabPageToolsTextBox"
+            throw
+        }
         $downloadPath = Join-Path $tempFolder ("GeoLite2" + $db + ".tar")
-        Start-Process $zipPath -ArgumentList "x `"$downloadPath`" -o`"$tempFolder`" -y" -NoNewWindow -Wait
+        try {
+            Invoke-ExternalProcessQuiet -FilePath $zipPath -ArgumentList "x `"$downloadPath`" -o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext ("7-Zip extraction (.tar) for GeoLite2 {0}" -f $db)
+        } catch {
+            Update-Log ("Failed to extract GeoLite2 " + $db + " archive (.tar): $_") "tabPageToolsTextBox"
+            throw
+        }
 
         # Locate the .mmdb file in the extracted folder
         $mmdbPath = Get-ChildItem -Path $tempFolder -Filter "*.mmdb" -Recurse | Select-Object -ExpandProperty FullName -First 1
@@ -590,6 +871,21 @@ function Download-Hayabusa {
         New-Item -ItemType Directory -Path $HayabusaFolder | Out-Null
     }		
     $HayabusaExecutable = Get-ChildItem -Path $HayabusaFolder -Filter "hayabusa*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+
+    # Existing install: prefer rules update in place and skip binary download.
+    if ($HayabusaExecutable -and (Test-Path $HayabusaExecutable)) {
+        Update-Log "Existing Hayabusa installation found. Updating rules..." "tabPageToolsTextBox"
+        try {
+            $hayabusaDirectory = Split-Path $HayabusaExecutable
+            Invoke-ExternalProcessQuiet -FilePath $HayabusaExecutable -WorkingDirectory $hayabusaDirectory -ArgumentList "update-rules" -ErrorContext "Hayabusa rules update (existing install)" -TimeoutSeconds 300 -UseShellExecuteHidden
+            Update-Log "Hayabusa rules updated." "tabPageToolsTextBox"
+        } catch {
+            Update-Log "Error updating Hayabusa rules: $_" "tabPageToolsTextBox"
+            throw
+        }
+        return
+    }
+
     $tempFolder = Join-Path $toolsDirectory "TempHayabusa"
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
@@ -634,6 +930,21 @@ function Download-Hayabusa {
             } else {
                 Update-Log "Hayabusa is already up-to-date." "tabPageToolsTextBox"
             }
+
+            $hayabusaExecutableToRun = Get-ChildItem -Path $HayabusaFolder -Filter "hayabusa*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+            if ($hayabusaExecutableToRun -and (Test-Path $hayabusaExecutableToRun)) {
+                Update-Log "Updating Hayabusa rules..." "tabPageToolsTextBox"
+                try {
+                    $hayabusaDirectory = Split-Path $hayabusaExecutableToRun
+                    Invoke-ExternalProcessQuiet -FilePath $hayabusaExecutableToRun -WorkingDirectory $hayabusaDirectory -ArgumentList "update-rules" -ErrorContext "Hayabusa rules update (post-download)" -TimeoutSeconds 300 -UseShellExecuteHidden
+                    Update-Log "Hayabusa rules updated." "tabPageToolsTextBox"
+                } catch {
+                    Update-Log "Error updating Hayabusa rules: $_" "tabPageToolsTextBox"
+                    throw
+                }
+            } else {
+                Update-Log "Hayabusa rules update skipped: executable not found after update check." "tabPageToolsTextBox"
+            }
         } else {
             Update-Log "Downloaded Hayabusa executable not found in the extracted files." "tabPageToolsTextBox"
         }
@@ -653,15 +964,21 @@ function Download-Loki {
     $LokiExecutable = Get-ChildItem -Path $LokiFolder -Filter "loki.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $LokiUpgraderExecutable = Get-ChildItem -Path $LokiFolder -Filter "loki-upgrader.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 
-    # Check if both loki.exe and loki-upgrader.exe exist
-    if ($LokiExecutable -and $LokiUpgraderExecutable -and (Test-Path $LokiExecutable) -and (Test-Path $LokiUpgraderExecutable)) {
-        # Only run loki-upgrader.exe
+    # Existing install: prefer signature update in place and skip binary download.
+    if ($LokiExecutable -and (Test-Path $LokiExecutable)) {
+        Update-Log "Existing Loki installation found. Updating signatures..." "tabPageToolsTextBox"
         try {
-            $lokiUpgraderDirectory = Split-Path $LokiUpgraderExecutable
-            Start-Process -FilePath $LokiUpgraderExecutable -WorkingDirectory $lokiUpgraderDirectory -Wait -NoNewWindow
+            if ($LokiUpgraderExecutable -and (Test-Path $LokiUpgraderExecutable)) {
+                $lokiUpgraderDirectory = Split-Path $LokiUpgraderExecutable
+                Invoke-ExternalProcessQuiet -FilePath $LokiUpgraderExecutable -WorkingDirectory $lokiUpgraderDirectory -ArgumentList "" -ErrorContext "Loki signatures update (existing install, upgrader)" -TimeoutSeconds 300 -UseShellExecuteHidden
+            } else {
+                $lokiDirectory = Split-Path $LokiExecutable
+                Invoke-ExternalProcessQuiet -FilePath $LokiExecutable -WorkingDirectory $lokiDirectory -ArgumentList "--update" -ErrorContext "Loki signatures update (existing install, loki --update)" -TimeoutSeconds 300 -UseShellExecuteHidden
+            }
             Update-Log "Loki signatures updated." "tabPageToolsTextBox"
         } catch {
             Update-Log "Error updating Loki signatures: $_" "tabPageToolsTextBox"
+            throw
         }
         return
     }
@@ -717,14 +1034,21 @@ function Download-Loki {
     try {
         $lokiUpgraderPath = Get-ChildItem -Path $LokiFolder -Filter "loki-upgrader.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
         if (Test-Path $lokiUpgraderPath) {
+            Update-Log "Updating Loki signatures..." "tabPageToolsTextBox"
             $lokiUpgraderDirectory = Split-Path $lokiUpgraderPath
-            Start-Process -FilePath $lokiUpgraderPath -WorkingDirectory $lokiUpgraderDirectory -Wait -NoNewWindow
+            Invoke-ExternalProcessQuiet -FilePath $lokiUpgraderPath -WorkingDirectory $lokiUpgraderDirectory -ArgumentList "" -ErrorContext "Loki signatures update (post-download)" -TimeoutSeconds 300 -UseShellExecuteHidden
+            Update-Log "Loki signatures updated." "tabPageToolsTextBox"
+        } elseif ($LokiExecutable -and (Test-Path $LokiExecutable)) {
+            Update-Log "loki-upgrader.exe not found. Running loki.exe --update..." "tabPageToolsTextBox"
+            $lokiDirectory = Split-Path $LokiExecutable
+            Invoke-ExternalProcessQuiet -FilePath $LokiExecutable -WorkingDirectory $lokiDirectory -ArgumentList "--update" -ErrorContext "Loki signatures update (post-download, loki --update)" -TimeoutSeconds 300 -UseShellExecuteHidden
             Update-Log "Loki signatures updated." "tabPageToolsTextBox"
         } else {
-            Update-Log "loki-upgrader.exe not found in Loki directory." "tabPageToolsTextBox"
+            Update-Log "loki-upgrader.exe not found in Loki directory and loki.exe is unavailable for --update." "tabPageToolsTextBox"
         }
     } catch {
         Update-Log "Error updating Loki signatures: $_" "tabPageToolsTextBox"
+        throw
     }
 	
     Remove-Item -Path $tempFolder -Recurse -Force
@@ -766,14 +1090,20 @@ function Download-Plaso {
         return
     }
     if (Test-Path $tarGzPath) {
+        Update-Log "Extracting Plaso archive..." "tabPageToolsTextBox"
         # Extract .gz
         $tarPath = $tarGzPath -replace '\.gz$', ''
-        Start-Process $7zipPath -ArgumentList "e `"$tarGzPath`" `-o`"$tempFolder`" -y" -NoNewWindow -Wait
-        # Extract .tar
-        Start-Process $7zipPath -ArgumentList "x `"$tarPath`" `-o`"$tempFolder`" -y" -NoNewWindow -Wait
-		# Remove .tar and .gz files from the temp folder
-		Remove-Item -Path $tarGzPath -Force
-		Remove-Item -Path $tarPath -Force		
+        try {
+            Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList "e `"$tarGzPath`" `-o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext "7-Zip extraction (.gz) for Plaso"
+            # Extract .tar
+            Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList "x `"$tarPath`" `-o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext "7-Zip extraction (.tar) for Plaso"
+        } catch {
+            Update-Log "Failed to extract Plaso with 7-Zip: $_" "tabPageToolsTextBox"
+            throw
+        }
+			# Remove .tar and .gz files from the temp folder
+			Remove-Item -Path $tarGzPath -Force
+			Remove-Item -Path $tarPath -Force		
         # Find log2timeline.py in the extracted files
         $log2timelinetempPY = Get-ChildItem -Path $tempFolder -Filter "log2timeline.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 		if ($log2timelinetempPY) {
@@ -1137,39 +1467,66 @@ function Download-Zircolite {
     }
     if (Test-Path $downloadPath) {
         # Extract the zip file
-		try {
-			# Use 7-Zip to extract the ZIP file
-			$7zipArgs = "x `"$downloadPath`" -o`"$tempFolder`" -y"
-			Start-Process $7zipPath -ArgumentList $7zipArgs -NoNewWindow -Wait -ErrorAction Stop
-		} catch {
-			Update-Log "Failed to extract Zircolite with 7-Zip: $_" "tabPageToolsTextBox"
-			return
-		}
+			try {
+				$7zipArgs = "x `"$downloadPath`" -o`"$tempFolder`" -y"
+				Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs -WorkingDirectory $tempFolder -ErrorContext "7-Zip extraction (temp) for Zircolite"
+			} catch {
+				Update-Log "Failed to extract Zircolite with 7-Zip: $_" "tabPageToolsTextBox"
+				throw
+			}
 
         # Identify the executable based on pattern
         $extractedExecutable = Get-ChildItem -Path $tempFolder -Filter "Zircolite*.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
 
-        if ($extractedExecutable) {
-            # Calculate hash of the downloaded executable
-            $newHash = (Get-FileHash -Path $extractedExecutable -Algorithm SHA256).Hash
-            $existingHash = if ($ZircoliteExecutable -and (Test-Path $ZircoliteExecutable)) { (Get-FileHash -Path $ZircoliteExecutable -Algorithm SHA256).Hash } else { "" }
+	        if ($extractedExecutable) {
+                $zircoliteExecutableToRun = $null
+	            # Calculate hash of the downloaded executable
+	            $newHash = (Get-FileHash -Path $extractedExecutable -Algorithm SHA256).Hash
+	            $existingHash = if ($ZircoliteExecutable -and (Test-Path $ZircoliteExecutable)) { (Get-FileHash -Path $ZircoliteExecutable -Algorithm SHA256).Hash } else { "" }
 
-            if (-not $ZircoliteExecutable -or $newHash -ne $existingHash) {
+	            if (-not $ZircoliteExecutable -or $newHash -ne $existingHash) {
 				# Check and clear the Zircolite folder
 				if (Test-Path $ZircoliteFolder) {
 					Remove-Item -Path $ZircoliteFolder\* -Recurse -Force
-				}
-				# Use 7-Zip to extract the ZIP file directly into the Zircolite folder
-				$7zipArgs2 = "x `"$downloadPath`" -o`"$ZircoliteFolder`" -y"
-				Start-Process $7zipPath -ArgumentList $7zipArgs2 -NoNewWindow -Wait -ErrorAction Stop
-                Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable)
-                Update-Log "Zircolite updated." "tabPageToolsTextBox"
-            } else {
-                Update-Log "Zircolite is already up-to-date." "tabPageToolsTextBox"
-            }
-        } else {
-            Update-Log "Downloaded Zircolite executable not found in the extracted files." "tabPageToolsTextBox"
-        }
+					}
+					# Use 7-Zip to extract the ZIP file directly into the Zircolite folder
+					$7zipArgs2 = "x `"$downloadPath`" -o`"$ZircoliteFolder`" -y"
+					Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs2 -WorkingDirectory $ZircoliteFolder -ErrorContext "7-Zip extraction (final) for Zircolite"
+                    $zircoliteExecutableToRun = Get-ChildItem -Path $ZircoliteFolder -Filter "Zircolite*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+                    if ([string]::IsNullOrWhiteSpace($zircoliteExecutableToRun)) {
+                        $zircoliteExecutableToRun = $extractedExecutable
+                    }
+	                Add-ToolToCsv -toolName (Split-Path -Leaf $zircoliteExecutableToRun)
+	                Update-Log "Zircolite updated." "tabPageToolsTextBox"
+	            } else {
+                    $zircoliteExecutableToRun = $ZircoliteExecutable
+	                Update-Log "Zircolite is already up-to-date." "tabPageToolsTextBox"
+	            }
+
+                if (-not [string]::IsNullOrWhiteSpace($zircoliteExecutableToRun) -and (Test-Path -LiteralPath $zircoliteExecutableToRun)) {
+                    $rulesUpdated = $false
+                    Update-Log "Updating Zircolite rules..." "tabPageToolsTextBox"
+                    try {
+                        Invoke-ExternalProcessQuiet -FilePath $zircoliteExecutableToRun -ArgumentList "-U" -WorkingDirectory $ZircoliteFolder -ErrorContext "Zircolite rules update (-U)" -TimeoutSeconds 300 -UseShellExecuteHidden
+                        $rulesUpdated = $true
+                    } catch {
+                        try {
+                            Invoke-ExternalProcessQuiet -FilePath $zircoliteExecutableToRun -ArgumentList "--update-rules" -WorkingDirectory $ZircoliteFolder -ErrorContext "Zircolite rules update (--update-rules)" -TimeoutSeconds 300 -UseShellExecuteHidden
+                            $rulesUpdated = $true
+                        } catch {
+                            Update-Log "Zircolite rules update failed: $_" "tabPageToolsTextBox"
+                        }
+                    }
+
+                    if ($rulesUpdated) {
+                        Update-Log "Zircolite rules updated." "tabPageToolsTextBox"
+                    }
+                } else {
+                    Update-Log "Zircolite rules update skipped: executable not found after update check." "tabPageToolsTextBox"
+                }
+	        } else {
+	            Update-Log "Downloaded Zircolite executable not found in the extracted files." "tabPageToolsTextBox"
+	        }
     } else {
         Update-Log "Downloaded Zircolite executable not found." "tabPageToolsTextBox"
     }

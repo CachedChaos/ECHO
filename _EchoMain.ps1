@@ -1354,13 +1354,13 @@ function Update-Log {
 		<!-- Tool Page Tab -->
 		<TabItem Header="Tool Management" IsEnabled="False" x:Name="TabPageTools">
 			<Grid>
-				<TextBlock HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,10,0,0" Width="740">
-					<Run Text="This page gives details on the various tools used in this program and allows for their download/update."/>
-					<LineBreak/>
-					<Run Text="The GUI may temporarily freeze during tool downloads or updates. Users are advised to be patient during these processes."/>
-				</TextBlock>
+					<TextBlock HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,10,0,0" Width="740">
+						<Run Text="This page gives details on the various tools used in this program and allows for their download/update."/>
+						<LineBreak/>
+						<Run Text="Downloads run in the background. Use the status field to track the selected tool while a download/update is running."/>
+					</TextBlock>
 				<TextBlock Text="Select a tool for details and to download or update" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,45,0,0" TextWrapping="Wrap"/>
-				<ComboBox x:Name="ToolsSelectionComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,65,0,0" Width="200">
+					<ComboBox x:Name="ToolsSelectionComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,65,0,0" Width="200">
 					<ComboBoxItem Content="7zip" />
 					<ComboBoxItem Content="BulkExtractor" />
 					<ComboBoxItem Content="chainsaw" />						
@@ -1377,9 +1377,10 @@ function Update-Log {
 					<ComboBoxItem Content="winpmem" />					
 					<ComboBoxItem Content="ZimmermanTools" />
 					<ComboBoxItem Content="Zircolite" />					
-				</ComboBox>
-				<TextBox x:Name="ToolDescriptionTextBox" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="10,100" Width="740" Height="300" TextWrapping="Wrap" IsReadOnly="True"/>		
-				<Button x:Name="DownloadToolButton" Content="Download\Update" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="215,65,0,0" Width="125" IsEnabled="False"/>				
+					</ComboBox>
+					<TextBlock x:Name="ToolDownloadStatusTextBlock" Text="Status: Idle" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="350,70,0,0" TextWrapping="Wrap" Width="390"/>
+					<TextBox x:Name="ToolDescriptionTextBox" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="10,100" Width="740" Height="300" TextWrapping="Wrap" IsReadOnly="True"/>		
+					<Button x:Name="DownloadToolButton" Content="Download\Update" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="215,65,0,0" Width="125" IsEnabled="False"/>				
 				<!-- Log Display -->
 				<TextBox x:Name="tabPageToolsTextBox" Text="" HorizontalAlignment="Center" Width="740" VerticalAlignment="Bottom" Height="100" Margin="10" TextWrapping="Wrap" IsReadOnly="True"/>
 			</Grid>
@@ -2279,6 +2280,11 @@ function Set-ProcessArtifactsFixedTextBoxWithBrowse {
 }
 
 function Set-ProcessArtifactsResponsiveLayout {
+    $sizeKey = "$($TabProcessSystemArtifacts.ActualWidth)x$($TabProcessSystemArtifacts.ActualHeight)"
+    if ($script:lastProcessArtifactsLayoutSizeKey -eq $sizeKey) {
+        return
+    }
+    $script:lastProcessArtifactsLayoutSizeKey = $sizeKey
 
     foreach ($headerBlock in @($ArtifactProcessingInfoTextBlock, $ArtifactProcessingPathTextBlock)) {
         if ($headerBlock) {
@@ -2299,15 +2305,19 @@ function Set-ProcessArtifactsResponsiveLayout {
     }
 
     Set-ProcessArtifactsStretchTextBoxWithBrowse -TextBoxControl $ArtifactProcessingPathTextBox -BrowseButtonControl $ArtifactProcessingPathButton -Left 10 -Top 65
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $BulkExtractorPathTextBox -BrowseButtonControl $BrowseBulkExtractorPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ZimmermanPathTextBox -BrowseButtonControl $BrowseZimmermanPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $PlasoPathTextBox -BrowseButtonControl $BrowsePlasoPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $SevenzipPathTextBox -BrowseButtonControl $Browse7zipPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $GeoLite2CityDBPathTextBox -BrowseButtonControl $BrowseGeoLite2CityDBPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ChainsawPathTextBox -BrowseButtonControl $BrowseChainsawPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $HayabusaPathTextBox -BrowseButtonControl $BrowseHayabusaPathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ZircolitePathTextBox -BrowseButtonControl $BrowseZircolitePathButton -TextLeft 170 -Top 175
-    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $sqlitePathTextBox -BrowseButtonControl $BrowsesqlitePathButton -TextLeft 170 -Top 175
+    foreach ($toolPathControlPair in @(
+        @($BulkExtractorPathTextBox, $BrowseBulkExtractorPathButton),
+        @($ZimmermanPathTextBox, $BrowseZimmermanPathButton),
+        @($PlasoPathTextBox, $BrowsePlasoPathButton),
+        @($SevenzipPathTextBox, $Browse7zipPathButton),
+        @($GeoLite2CityDBPathTextBox, $BrowseGeoLite2CityDBPathButton),
+        @($ChainsawPathTextBox, $BrowseChainsawPathButton),
+        @($HayabusaPathTextBox, $BrowseHayabusaPathButton),
+        @($ZircolitePathTextBox, $BrowseZircolitePathButton),
+        @($sqlitePathTextBox, $BrowsesqlitePathButton)
+    )) {
+        Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $toolPathControlPair[0] -BrowseButtonControl $toolPathControlPair[1] -TextLeft 170 -Top 175
+    }
 
     if ($ProcessSystemTextBox) {
         $ProcessSystemTextBox.HorizontalAlignment = 'Stretch'
@@ -2536,6 +2546,7 @@ $DownloadToolButton.Add_Click({ DownloadToolButton_Click })
 $TabPageTools.Add_GotFocus({ OnTabTabPageTools_GotFocus })
 $ToolsSelectionComboBox = $window.FindName("ToolsSelectionComboBox")
 $ToolDescriptionTextBox = $window.FindName("ToolDescriptionTextBox")
+$ToolDownloadStatusTextBlock = $window.FindName("ToolDownloadStatusTextBlock")
 
 # Define a hashtable for tool descriptions
 $toolDescriptions = @{
@@ -2636,11 +2647,19 @@ $ToolsSelectionComboBox.Add_SelectionChanged({
     param([System.Object]$sender, [System.Windows.Controls.SelectionChangedEventArgs]$e)
 
     # Get the selected item
-    $selectedItem = $sender.SelectedItem.Content
+    $selectedItem = $null
+    if ($sender.SelectedItem -and $sender.SelectedItem.Content) {
+        $selectedItem = [string]$sender.SelectedItem.Content
+    }
 
     # Update the ToolDescriptionTextBox based on the selected item
-    $ToolDescriptionTextBox.Text = $toolDescriptions[$selectedItem]
-	$DownloadToolButton.IsEnabled = $selectedItem -ne $null
+    if ($selectedItem -and $toolDescriptions.ContainsKey($selectedItem)) {
+        $ToolDescriptionTextBox.Text = $toolDescriptions[$selectedItem]
+    } else {
+        $ToolDescriptionTextBox.Clear()
+    }
+    Update-SelectedToolDownloadStatus
+    Update-DownloadToolButtonState
 })
 
 # Add Tool to CSV right after GUI setup
@@ -2737,11 +2756,13 @@ $QuickSyncCheckBox.Add_Checked({
     $QuickSyncComboBox.IsEnabled = $true
 	$SyncProcessingPathTextBox.IsEnabled = $false
 	$SyncProcessingPathButton.IsEnabled = $false
+    UpdateSyncTimesketchButtonState
 })
 $QuickSyncCheckBox.Add_Unchecked({
     $QuickSyncComboBox.IsEnabled = $false
 	$SyncProcessingPathTextBox.IsEnabled = $true
 	$SyncProcessingPathButton.IsEnabled = $true
+    UpdateSyncTimesketchButtonState
 })
 
 $NewTimesketchCheckBox.Add_Checked({
@@ -2780,10 +2801,19 @@ $QuickSyncComboBox.Add_DropDownOpened({
     foreach ($dir in $directories) {
         if (Test-Path $dir) {
             $dirName = Split-Path $dir -Leaf
-            $QuickSyncComboBox.Items.Add($dirName)
-            $global:quickSyncPaths[$dirName] = $dir
+            $displayName = $dirName
+            if ($global:quickSyncPaths.ContainsKey($displayName)) {
+                $suffix = 2
+                while ($global:quickSyncPaths.ContainsKey("$dirName ($suffix)")) {
+                    $suffix++
+                }
+                $displayName = "$dirName ($suffix)"
+            }
+            $QuickSyncComboBox.Items.Add($displayName)
+            $global:quickSyncPaths[$displayName] = $dir
         }
     }
+    UpdateSyncTimesketchButtonState
 })
 
 
