@@ -16,16 +16,16 @@ Add-Type -AssemblyName PresentationFramework
 $executableDirectory = Split-Path -Parent $PSCommandPath
 $toolsDirectory = Join-Path -Path $executableDirectory -ChildPath "Tools"
 
-function Is-Admin {
-    $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
-    return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Test-AdminRights {
+	$currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
+	return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
 # Restart script with administrator rights if not already running as admin
-if (-not (Is-Admin)) {
-    $scriptPath = $MyInvocation.MyCommand.Definition
-    Start-Process PowerShell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
-    exit
+if (-not (Test-AdminRights)) {
+	$scriptPath = $MyInvocation.MyCommand.Definition
+	Start-Process PowerShell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" -Verb RunAs
+	exit
 }
 
 # Check if cases.csv exists, and create it if it doesn't
@@ -127,15 +127,18 @@ function New-Case {
 			Created = (Get-Date)
         }
         $CaseInfo | Export-Csv -Path "$executableDirectory\cases.csv" -NoTypeInformation -Append
-        Update-Log "Case '$CaseName' created successfully in '$CaseDirectory'." "caseCreationLogTextBox"		
+        Update-Log "Case '$CaseName' created successfully in '$CaseDirectory'." "caseCreationLogTextBox"
+
+	    # Create the case transcript file only for newly created cases.
+        $TextFilePath = Join-Path $CaseDirectory "$CaseName.txt"
+        if (-not (Test-Path $TextFilePath)) {
+            New-Item -ItemType File -Path $TextFilePath | Out-Null
+            Update-Log "Text file '$CaseName.txt' created in case directory." "caseCreationLogTextBox"
+        }
     }
     else {
         Update-Log "A case with the name '$CaseName' already exists in '$CaseLocation'." "caseCreationLogTextBox"
     }
-	# Create text file in case directory
-    $TextFilePath = Join-Path $CaseDirectory "$CaseName.txt"
-    New-Item -ItemType File -Path $TextFilePath | Out-Null
-    Update-Log "Text file '$CaseName.txt' created in case directory." "caseCreationLogTextBox"
 	return
 }
 
@@ -173,9 +176,33 @@ function Get-Cases {
     return $Cases
 }
 
+function Test-CaseRecordIsUsable {
+    param(
+        [string]$CaseName,
+        [string]$CasePath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CaseName) -or [string]::IsNullOrWhiteSpace($CasePath)) {
+        return $false
+    }
+
+    try {
+        $normalizedPath = $CasePath.Trim()
+        if (-not (Test-Path -LiteralPath $normalizedPath -PathType Container)) {
+            return $false
+        }
+
+        $caseTranscriptPath = Join-Path -Path $normalizedPath -ChildPath "$CaseName.txt"
+        return (Test-Path -LiteralPath $caseTranscriptPath -PathType Leaf)
+    } catch {
+        return $false
+    }
+}
+
 function Open-Case {
     param(
-        [string]$CaseName
+        [string]$CaseName,
+        [string]$CasePath
     )
 
     # If a case is already open, close and archive its transcript
@@ -233,22 +260,56 @@ function Open-Case {
 
     # Get the case details from the CSV file
     $Cases = @(Get-Cases)
-    $SelectedCase = $Cases | Where-Object { $_.Name -eq $CaseName }
+    $MatchingCases = @($Cases | Where-Object { $_.Name -eq $CaseName })
+
+    if (-not [string]::IsNullOrWhiteSpace($CasePath)) {
+        $normalizedRequestedPath = $CasePath.Trim()
+        $MatchingCases = @(
+            $MatchingCases | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.Path) -and $_.Path.Trim().ToLowerInvariant() -eq $normalizedRequestedPath.ToLowerInvariant()
+            }
+        )
+    }
 
     # Check if the selected case exists
-    if (-not $SelectedCase) {
+    if ($MatchingCases.Count -eq 0) {
         Update-Log "Case '$CaseName' not found in CSV file." "caseCreationLogTextBox"
         return
     }
 
-    # Construct case directory path and set global variable
-    $CaseDirectory = $SelectedCase.Path
+    # Handle duplicate case names by preferring the single usable record.
+    $SelectedCase = $null
+    if ($MatchingCases.Count -gt 1) {
+        $usableCases = @(
+            $MatchingCases | Where-Object {
+                Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path
+            }
+        )
 
-    if (Test-Path $CaseDirectory) {
-        Set-Variable -Name "Global:CurrentCaseName" -Value $SelectedCase.Name
-        if (-not (Test-Path "$CaseDirectory\$($SelectedCase.Name).txt")) {
-            New-Item -ItemType File -Path "$CaseDirectory\$($SelectedCase.Name).txt"
+        if ($usableCases.Count -eq 1) {
+            $SelectedCase = $usableCases[0]
+        } elseif ($usableCases.Count -gt 1) {
+            Update-Log "Multiple usable cases named '$CaseName' were found. Open from the case grid row instead." "caseCreationLogTextBox"
+            [System.Windows.MessageBox]::Show("Multiple cases named '$CaseName' are usable. Double-click the exact row in the case grid to open the correct one.", "Ambiguous Case", 'OK', 'Warning')
+            return
+        } else {
+            # Fall back to first match for a clear validation error below.
+            $SelectedCase = $MatchingCases[0]
         }
+    } else {
+        $SelectedCase = $MatchingCases[0]
+    }
+
+    # Construct case directory path and validate case structure before opening
+    $CaseDirectory = $SelectedCase.Path
+    if (-not (Test-CaseRecordIsUsable -CaseName $SelectedCase.Name -CasePath $CaseDirectory)) {
+        Update-Log "Case '$($SelectedCase.Name)' is missing required files or has an invalid path." "caseCreationLogTextBox"
+        [System.Windows.MessageBox]::Show("Case '$($SelectedCase.Name)' is missing required files (`"$($SelectedCase.Name).txt`") or has an invalid path.", "Case Invalid", 'OK', 'Error')
+        return
+    }
+
+    if (Test-Path -LiteralPath $CaseDirectory -PathType Container) {
+        Set-Variable -Name "Global:CurrentCaseName" -Value $SelectedCase.Name
         $TranscriptFile = Join-Path $CaseDirectory "$CaseName.txt"
         Start-Transcript -Path $TranscriptFile -Append
         Set-Variable -Name "Global:CurrentCaseDirectory" -Value $CaseDirectory
@@ -268,11 +329,9 @@ function Open-Case {
         $window.Title = "ECHO - Evidence Collection & Handling Orchestrator - $($SelectedCase.Name)"
 		$global:hasRunOnTabCollectMemory = $false
 		$global:hasRunOnTabProcessArtifacts = $false
-		$global:hasRunCollectPacketCaptur = $false
 		$global:hasRunOnTabCollectSystemArtifacts = $false
 		$global:hasRunOnTabCollectDiskImage = $false
 		$global:hasRunOnTabCollectM365 = $false
-		$global:hasRunOnTabCollectMemory = $false
 		$global:hasRunOnTabPageTools = $false
 		$global:hasRunOnTabSyncTools = $false
         Update-Log "Case '$($SelectedCase.Name)' opened successfully." "caseCreationLogTextBox"
@@ -363,6 +422,7 @@ function OpenCaseButton_Click {
         [System.Windows.MessageBox]::Show("Please select a case from the dropdown.", "Error", "OK", "Error")
         return
     }
+    $CaseName = $CaseName -replace '\s+\(Missing\)$', ''
     Open-Case -CaseName $CaseName
 }
 
@@ -400,7 +460,7 @@ function PopulateCaseControls {
 			Name    = $_.Name
 			Path    = $_.Path
 			Created = $_.Created
-			Status  = if (Test-Path $_.Path.Trim()) { "Exists" } else { "Missing" }
+			Status  = if (Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path) { "Exists" } else { "Missing" }
 		}
 	})
 
@@ -1346,12 +1406,12 @@ $casesDataGrid.Add_MouseDoubleClick({
         $selectedCaseName = $selectedCase.Name
         $CaseDirectory = $selectedCase.Path.Trim()
 
-        if (Test-Path $CaseDirectory) {
+        if (Test-CaseRecordIsUsable -CaseName $selectedCaseName -CasePath $CaseDirectory) {
             # Call Open-Case with the case name
-            Open-Case -CaseName $selectedCaseName
+            Open-Case -CaseName $selectedCaseName -CasePath $CaseDirectory
         } else {
-            # Show an error message if the directory doesn't exist
-            [System.Windows.MessageBox]::Show("The directory for case '$selectedCaseName' does not exist on disk.", "Error", 'OK', 'Error')
+            # Show an error message if the case is incomplete or path is invalid
+            [System.Windows.MessageBox]::Show("Case '$selectedCaseName' is missing required files (`"$selectedCaseName.txt`") or has an invalid path.", "Error", 'OK', 'Error')
         }
     } else {
         # Show a warning if no case is selected
