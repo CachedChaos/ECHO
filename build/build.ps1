@@ -41,4 +41,4 @@ foreach ($file in $files) {
 }
 
 # Call PS2EXE (adjust icon path if needed)
-Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6' -product 'Evidence Handling & Processing Orchestrator'
+Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6.1' -product 'Evidence Handling & Processing Orchestrator'
