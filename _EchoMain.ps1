@@ -768,8 +768,11 @@ function Update-Log {
 <Window 
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    x:Name="MainWindow" Title="ECHO - Evidence Collection &amp; Handling Orchestrator" Height="600" Width="800">
-    <TabControl>
+    x:Name="MainWindow" Title="ECHO - Evidence Collection &amp; Handling Orchestrator" Height="600" Width="800" MinHeight="540" MinWidth="760" WindowStartupLocation="CenterScreen">
+    <Grid>
+    <Viewbox x:Name="MainViewbox" Stretch="Uniform" StretchDirection="Both">
+    <Grid Width="800" Height="600">
+    <TabControl x:Name="MainTabControl">
         <!-- Home Tab -->
         <TabItem Header="Home">
             <Grid>
@@ -1383,6 +1386,9 @@ function Update-Log {
 		</TabItem>
 		
     </TabControl>
+    </Grid>
+    </Viewbox>
+    </Grid>
 </Window>
 
 "@
@@ -2205,6 +2211,8 @@ $TimelineArtifactsEndDate = $window.FindName("TimelineArtifactsEndDate")
 $TimelineArtifactsEndDatePicker = $window.FindName("TimelineArtifactsEndDatePicker")
 $TimelineArtifactTextBlock = $window.FindName("TimelineArtifactTextBlock")
 $sqlitePathTextBox = $window.FindName("sqlitePathTextBox")
+$ArtifactProcessingInfoTextBlock = $window.FindName("ArtifactProcessingInfoTextBlock")
+$ArtifactProcessingPathTextBlock = $window.FindName("ArtifactProcessingPathTextBlock")
 $OpenCustomTimelineIOCsButton = $window.FindName("OpenCustomTimelineIOCsButton")
 $OpenCustomTimelineIOCsButton.Add_Click({
     Start-Process $global:timelineIOCFilePath
@@ -2228,6 +2236,88 @@ $TimelineDateRangeCheckBox.Add_Unchecked({
     $TimelineArtifactsEndDatePicker.IsEnabled = $false
     $TimelineArtifactsStartDatePicker.IsEnabled = $false
 })
+
+function Set-ProcessArtifactsStretchTextBoxWithBrowse {
+    param(
+        [object]$TextBoxControl,
+        [object]$BrowseButtonControl,
+        [double]$Left,
+        [double]$Top,
+        [double]$Right = 45
+    )
+
+    if ($TextBoxControl) {
+        $TextBoxControl.HorizontalAlignment = 'Stretch'
+        $TextBoxControl.Width = [double]::NaN
+        $TextBoxControl.Margin = New-Object System.Windows.Thickness($Left, $Top, $Right, 0)
+    }
+    if ($BrowseButtonControl) {
+        $BrowseButtonControl.HorizontalAlignment = 'Right'
+        $BrowseButtonControl.Margin = New-Object System.Windows.Thickness(0, $Top, 10, 0)
+    }
+}
+
+function Set-ProcessArtifactsFixedTextBoxWithBrowse {
+    param(
+        [object]$TextBoxControl,
+        [object]$BrowseButtonControl,
+        [double]$TextLeft,
+        [double]$Top,
+        [double]$TextWidth = 300,
+        [double]$ButtonLeft = 475
+    )
+
+    if ($TextBoxControl) {
+        $TextBoxControl.HorizontalAlignment = 'Left'
+        $TextBoxControl.Width = $TextWidth
+        $TextBoxControl.Margin = New-Object System.Windows.Thickness($TextLeft, $Top, 0, 0)
+    }
+    if ($BrowseButtonControl) {
+        $BrowseButtonControl.HorizontalAlignment = 'Left'
+        $BrowseButtonControl.Margin = New-Object System.Windows.Thickness($ButtonLeft, $Top, 0, 0)
+    }
+}
+
+function Set-ProcessArtifactsResponsiveLayout {
+
+    foreach ($headerBlock in @($ArtifactProcessingInfoTextBlock, $ArtifactProcessingPathTextBlock)) {
+        if ($headerBlock) {
+            $headerBlock.HorizontalAlignment = 'Stretch'
+            $headerBlock.Width = [double]::NaN
+            $headerBlock.Margin = New-Object System.Windows.Thickness($headerBlock.Margin.Left, $headerBlock.Margin.Top, 10, 0)
+        }
+    }
+    if ($ProcessToolLocation) {
+        $ProcessToolLocation.HorizontalAlignment = 'Left'
+        $ProcessToolLocation.Width = 330
+        $ProcessToolLocation.Margin = New-Object System.Windows.Thickness(170, 155, 0, 0)
+    }
+    if ($ProcessToolExtraArguments) {
+        $ProcessToolExtraArguments.HorizontalAlignment = 'Left'
+        $ProcessToolExtraArguments.Width = 220
+        $ProcessToolExtraArguments.Margin = New-Object System.Windows.Thickness(510, 155, 0, 0)
+    }
+
+    Set-ProcessArtifactsStretchTextBoxWithBrowse -TextBoxControl $ArtifactProcessingPathTextBox -BrowseButtonControl $ArtifactProcessingPathButton -Left 10 -Top 65
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $BulkExtractorPathTextBox -BrowseButtonControl $BrowseBulkExtractorPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ZimmermanPathTextBox -BrowseButtonControl $BrowseZimmermanPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $PlasoPathTextBox -BrowseButtonControl $BrowsePlasoPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $SevenzipPathTextBox -BrowseButtonControl $Browse7zipPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $GeoLite2CityDBPathTextBox -BrowseButtonControl $BrowseGeoLite2CityDBPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ChainsawPathTextBox -BrowseButtonControl $BrowseChainsawPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $HayabusaPathTextBox -BrowseButtonControl $BrowseHayabusaPathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $ZircolitePathTextBox -BrowseButtonControl $BrowseZircolitePathButton -TextLeft 170 -Top 175
+    Set-ProcessArtifactsFixedTextBoxWithBrowse -TextBoxControl $sqlitePathTextBox -BrowseButtonControl $BrowsesqlitePathButton -TextLeft 170 -Top 175
+
+    if ($ProcessSystemTextBox) {
+        $ProcessSystemTextBox.HorizontalAlignment = 'Stretch'
+        $ProcessSystemTextBox.Width = [double]::NaN
+        $ProcessSystemTextBox.Margin = New-Object System.Windows.Thickness(10, 0, 10, 10)
+    }
+}
+
+Set-ProcessArtifactsResponsiveLayout
+$TabProcessSystemArtifacts.Add_SizeChanged({ Set-ProcessArtifactsResponsiveLayout })
 
 # processingtools controls
 function Set-ProcessingControlVisibility {
@@ -2293,32 +2383,6 @@ $processingToolControlSets = @{
         $TimelineArtifactTextBlock
     )
 }
-
-$allProcessingToolControls = @(
-    $ProcessToolLocation,
-    $ProcessToolExtraArguments,
-    $ProcessBulkExtractorButton, $BulkExtractorPathTextBox, $BrowseBulkExtractorPathButton, $BulkTextBlock,
-    $ProcessChainsawButton, $ChainsawPathTextBox, $BrowseChainsawPathButton, $ChainsawJson, $ChawnsawTextBlock,
-    $ProcessZimmermanButton, $ZtoolsComboBox, $ZimmermanPathTextBox, $BrowseZimmermanPathButton, $UpdateZimmermanButton, $ZimmermanTextBlock,
-    $Process7zipButton, $SevenzipPathTextBox, $Browse7zipPathButton, $sevenzipTextBlock,
-    $GeoLocateButton, $GeoLite2CityDBPathTextBox, $BrowseGeoLite2CityDBPathButton, $CheckVirusTotal, $GeolocateTextBlock,
-    $ProcessHayabusaButton, $HayabusaPathTextBox, $BrowseHayabusaPathButton,
-    $HayabusaDateRangeCheckBox, $HayabusaStartDate, $HayabusaStartDatePicker, $HayabusaEndDate, $HayabusaEndDatePicker,
-    $HayabusaGeoDBCheckBox, $HayabusaTextBlock,
-    $ProcessPlasoButton, $PlasoPathTextBox, $BrowsePlasoPathButton,
-    $PlasoDateRangeCheckBox, $PlasoStartDate, $PlasoStartDatePicker, $PlasoEndDate, $PlasoEndDatePicker,
-    $PsortOnlyCheckBox, $PlasoTextBlock,
-    $ProcessZircoliteButton, $ZircolitePathTextBox, $BrowseZircolitePathButton,
-    $ZircolitejsonCheckBox, $ZircoliteRules, $ZircoliteRulesComboBox, $ZircoliteTemplates, $ZircoliteTemplatesComboBox,
-    $ZircoliteDateRangeCheckBox, $ZircoliteStartDate, $ZircoliteStartDatePicker, $ZircoliteEndDate, $ZircoliteEndDatePicker,
-    $UpdateZircoliteButton, $ZircolitepackageCheckBox, $ZircolitesysmonCheckBox, $ZircoliteTextBlock,
-    $ProcessTimelineArtifactsButton, $IncludeChainsaw, $IncludeHayabusa, $IncludeZimmerman, $IncludeZircolite,
-    $ExportTimelineArtifactsButton,
-    $TimelineArtifactsStartDate, $TimelineArtifactsStartDatePicker, $TimelineArtifactsEndDate, $TimelineArtifactsEndDatePicker,
-    $TimelineDateRangeCheckBox, $TimelineDateIOCCheckBox,
-    $sqlitePathTextBox, $BrowsesqlitePathButton, $OpenCustomTimelineIOCsButton,
-    $TimelineArtifactTextBlock
-)
 
 # Track currently visible controls so we only update what changed per selection.
 $script:currentProcessingVisibleControls = @()
@@ -2691,6 +2755,7 @@ $NewTimesketchCheckBox.Add_Unchecked({
 
 $QuickSyncComboBox.Add_DropDownOpened({
     $QuickSyncComboBox.Items.Clear()
+    $global:quickSyncPaths = @{}
     $baseDirectories = @(
         "$($CurrentCaseDirectory)\M365Evidence",
         "$($CurrentCaseDirectory)\MemoryArtifacts\VolOutput",
@@ -2701,8 +2766,12 @@ $QuickSyncComboBox.Add_DropDownOpened({
     # Prepare an empty array for all directories including _plaso directories
     $directories = @()
     $directories += $baseDirectories
-    $plasoDirectories = Get-ChildItem -Path "$($CurrentCaseDirectory)\SystemArtifacts\ProcessedArtifacts" -Directory |
-                        Where-Object { $_.Name -like "*_plaso" }
+    $processedArtifactsRoot = Join-Path $CurrentCaseDirectory "SystemArtifacts\ProcessedArtifacts"
+    $plasoDirectories = @()
+    if (Test-Path -LiteralPath $processedArtifactsRoot -PathType Container) {
+        $plasoDirectories = @(Get-ChildItem -Path $processedArtifactsRoot -Directory -ErrorAction SilentlyContinue |
+                              Where-Object { $_.Name -like "*_plaso" })
+    }
 
     foreach ($dir in $plasoDirectories) {
         $directories += $dir.FullName
@@ -2954,15 +3023,6 @@ $threatScannerControlSets = @{
         $UpdateLokiButton, $LokiUpdaterPathTextBox, $BrowseLokiUpdatePathButton, $LokiUpgraderLocation
     )
 }
-
-$allThreatScannerControls = @(
-    $ScanToolLocation, $ScanningToolExtraArguments,
-    $ScanClamAVButton, $ClamAVPathTextBox, $BrowseClamAVPathButton, $ClamAVTextBlock,
-    $UpdateclamAVButton, $clamAVUpdaterPathTextBox, $BrowseclamAVUpdatePathButton, $FreshclamLocation,
-    $ScanLokiButton, $LokiPathTextBox, $BrowseLokiPathButton, $LokiTextBlock,
-    $ProcscanCheckbox, $IntenseScanCheckbox, $VulnchecksCheckbox,
-    $UpdateLokiButton, $LokiUpdaterPathTextBox, $BrowseLokiUpdatePathButton, $LokiUpgraderLocation
-)
 
 $script:currentThreatScannerVisibleControls = @()
 
