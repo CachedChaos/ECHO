@@ -43,6 +43,67 @@ function Check-PythonInstalled {
     }
 }
 
+function Get-CurrentCaseLogPath {
+    param()
+
+    if ([string]::IsNullOrWhiteSpace($Global:CurrentCaseDirectory)) {
+        return $null
+    }
+
+    try {
+        $caseDirectory = $Global:CurrentCaseDirectory.Trim()
+        if (-not (Test-Path -LiteralPath $caseDirectory -PathType Container)) {
+            return $null
+        }
+
+        $caseName = (Get-Item -LiteralPath $caseDirectory).Name
+        return (Join-Path -Path $caseDirectory -ChildPath "$caseName.txt")
+    } catch {
+        return $null
+    }
+}
+
+function Write-CaseLogLine {
+    param(
+        [string]$LogLine
+    )
+
+    if ([string]::IsNullOrWhiteSpace($LogLine)) {
+        return
+    }
+
+    $caseLogPath = Get-CurrentCaseLogPath
+    if ([string]::IsNullOrWhiteSpace($caseLogPath)) {
+        return
+    }
+
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        try {
+            $stream = [System.IO.File]::Open($caseLogPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+            $writer = $null
+            try {
+                $writer = New-Object System.IO.StreamWriter($stream)
+                $writer.WriteLine($LogLine)
+                $writer.Flush()
+            } finally {
+                if ($writer -ne $null) {
+                    $writer.Dispose()
+                }
+                if ($stream -ne $null) {
+                    $stream.Dispose()
+                }
+            }
+            return
+        } catch {
+            if ($attempt -eq 2) {
+                Write-Host "Failed to write case log line: $_"
+            } else {
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
+}
+
 function Exit-Program {
     param()
 
@@ -56,15 +117,6 @@ function Exit-Program {
         $Global:PipeServerJob = $null
     }
 
-    # Attempt to stop transcription
-    try {
-        Stop-Transcript
-        # Wait for the transcript to fully stop
-        Start-Sleep -Seconds 2
-    } catch {
-        [System.Windows.MessageBox]::Show("Transcription already stopped or not started.")
-    }
-    
     if ($Global:CurrentCaseDirectory -ne $null) {
         $caseName = (Get-Item $Global:CurrentCaseDirectory).Name
         $date = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
@@ -105,7 +157,6 @@ function Exit-Program {
     }
 
     # Clear global variables
-    Set-Variable -Name "Global:CurrentCaseName" -Value $null > $null
     Set-Variable -Name "Global:CurrentCaseDirectory" -Value $null > $null
     [void]$window.Close()
 }
@@ -164,11 +215,11 @@ function Get-Cases {
         return @()
     }
 
-    # Import cases from CSV and clean up whitespace
+    # Import cases from CSV and clean up whitespace safely.
     $Cases = Import-Csv -Path "$executableDirectory\cases.csv" | ForEach-Object {
         [PSCustomObject]@{
-            Name    = $_.Name.Trim()
-            Path    = $_.Path.Trim()
+            Name    = if ($null -eq $_.Name) { "" } else { "$($_.Name)".Trim() }
+            Path    = if ($null -eq $_.Path) { "" } else { "$($_.Path)".Trim() }
             Created = $_.Created
         }
     }
@@ -207,12 +258,6 @@ function Open-Case {
 
     # If a case is already open, close and archive its transcript
     if ($Global:CurrentCaseDirectory) {
-        try {
-            Stop-Transcript
-        } catch {
-            [System.Windows.MessageBox]::Show("Error stopping current transcript. It may have been already stopped.")
-        }
-
         # Archive transcript file
         try {
             $currentCaseName = (Get-Item $Global:CurrentCaseDirectory).Name
@@ -309,9 +354,6 @@ function Open-Case {
     }
 
     if (Test-Path -LiteralPath $CaseDirectory -PathType Container) {
-        Set-Variable -Name "Global:CurrentCaseName" -Value $SelectedCase.Name
-        $TranscriptFile = Join-Path $CaseDirectory "$CaseName.txt"
-        Start-Transcript -Path $TranscriptFile -Append
         Set-Variable -Name "Global:CurrentCaseDirectory" -Value $CaseDirectory
 		
         # Enable new tabs
@@ -328,10 +370,7 @@ function Open-Case {
 		$window.FindName("TabElasticSearch").IsEnabled = $true		
         $window.Title = "ECHO - Evidence Collection & Handling Orchestrator - $($SelectedCase.Name)"
 		$global:hasRunOnTabCollectMemory = $false
-		$global:hasRunOnTabProcessArtifacts = $false
 		$global:hasRunOnTabCollectSystemArtifacts = $false
-		$global:hasRunOnTabCollectDiskImage = $false
-		$global:hasRunOnTabCollectM365 = $false
 		$global:hasRunOnTabPageTools = $false
 		$global:hasRunOnTabSyncTools = $false
         Update-Log "Case '$($SelectedCase.Name)' opened successfully." "caseCreationLogTextBox"
@@ -518,12 +557,17 @@ function Update-Log {
         default { $targetLog = $window.FindName("caseCreationLogTextBox") } # Default log box
     }
 
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $formattedMessage = "[$timestamp] $message"
+
     if ($targetLog -ne $null) {
-        $targetLog.AppendText("$message`r`n")
+        $targetLog.AppendText("$formattedMessage`r`n")
         # Set the caret position to the end and scroll to it
         $targetLog.CaretIndex = $targetLog.Text.Length
         $targetLog.ScrollToEnd()
     }
+
+    Write-CaseLogLine -LogLine $formattedMessage
 }
 
 # Load the XAML layout

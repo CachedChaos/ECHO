@@ -1,0 +1,79 @@
+# -------------------------
+# OS / Editor junk
+# -------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -------------------------
+# Shell / temp files
+# -------------------------
+*.tmp
+*.bak
+*.old
+*~
+
+# -------------------------
+# Logs & generated outputs
+# -------------------------
+*.log
+*.csv
+cases.csv
+
+# -------------------------
+# DFIR / investigation artifacts
+# -------------------------
+cases/
+case_data/
+evidence/
+artifacts/
+reports/
+output/
+tmp/
+Tools/
+tools/
+# -------------------------
+# Secrets / credentials
+# -------------------------
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.crt
+*.der
+
+# -------------------------
+# Archives (often accidental)
+# -------------------------
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+
+# -------------------------
+# TruffleHog / security tooling
+# -------------------------
+trufflehog.json
+trufflehog-results.json
+
+# -------------------------
+# Git safety
+# -------------------------
+.gitignore.bak
+
+# -------------------------
+# Other project files
+# -------------------------
+DEVELOPMENT.md
+.vscode/*
+!.vscode/tasks.json
+!.vscode/settings.json
