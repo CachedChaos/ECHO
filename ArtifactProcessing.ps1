@@ -97,6 +97,22 @@ $timelineexportJobTimer.Add_Tick({
 })
 
 function OnTabProcessArtifacts_GotFocus {
+    $currentCaseDirectory = [string]$global:currentcasedirectory
+    if ([string]::IsNullOrWhiteSpace($currentCaseDirectory)) {
+        return
+    }
+
+    $nowUtc = [DateTime]::UtcNow
+    if (
+        $script:lastProcessArtifactsFocusCase -eq $currentCaseDirectory -and
+        $script:lastProcessArtifactsFocusUtc -and
+        ($nowUtc - $script:lastProcessArtifactsFocusUtc).TotalMilliseconds -lt 1500
+    ) {
+        return
+    }
+    $script:lastProcessArtifactsFocusCase = $currentCaseDirectory
+    $script:lastProcessArtifactsFocusUtc = $nowUtc
+
     $subDirectoryPath = Join-Path $global:currentcasedirectory "SystemArtifacts"
     $global:timelineIOCFilePath = Join-Path $subDirectoryPath "CustomIOCs.txt"
     # Check if the subdirectory exists, if not, create it
