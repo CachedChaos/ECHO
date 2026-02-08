@@ -141,9 +141,21 @@ function OnTabProcessArtifacts_GotFocus {
 }
 
 function IsValidPath($path, $fileName) {
-    return -not [string]::IsNullOrEmpty($path) -and 
-           $path.EndsWith($fileName) -and 
-           (Test-Path $path)
+    if ([string]::IsNullOrWhiteSpace($path) -or [string]::IsNullOrWhiteSpace($fileName)) {
+        return $false
+    }
+
+    $resolvedPath = $path.Trim().Trim('"')
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        return $false
+    }
+
+    $leafName = Split-Path -Path $resolvedPath -Leaf
+    if ($fileName -like "*`**" -or $fileName -like "*`?*") {
+        return $leafName -like $fileName
+    }
+
+    return $leafName -ieq $fileName
 }
 
 function UpdateProcessingButtonsStatus() {
@@ -1955,17 +1967,23 @@ function Load-SQLiteDLL {
     if (Test-Path -Path $sqliteDllPath) {
         try {
             Unblock-File -Path $sqliteDllPath  # Unblock the file if it is blocked
-            Add-Type -Path $sqliteDllPath
+            $alreadyLoaded = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object {
+                $_.Location -and ($_.Location -ieq $sqliteDllPath)
+            }
+            if (-not $alreadyLoaded) {
+                Add-Type -Path $sqliteDllPath
+            }
             Write-Host "System.Data.SQLite.dll loaded successfully."
+            return $true
         } catch {
             Write-Host "Failed to load System.Data.SQLite.dll. Error: $_"
             Update-Log "Failed to load System.Data.SQLite.dll. Error: $_" "ProcessSystemTextBox"
-            exit
+            return $false
         }
     } else {
         Write-Host "System.Data.SQLite.dll not found. Please locate it."
         Update-Log "System.Data.SQLite.dll not found. Please locate it." "ProcessSystemTextBox"
-        exit
+        return $false
     }
 }
 
@@ -1976,7 +1994,10 @@ function ExportTimelineArtifactsButton_Click {
     }
 
     # Ensure the SQLite DLL is loaded
-    Load-SQLiteDLL
+    if (-not (Load-SQLiteDLL)) {
+        [System.Windows.MessageBox]::Show("Failed to load System.Data.SQLite.dll. Check the selected path and try again.")
+        return
+    }
 
     $artifactsTimelineDir = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\ArtifactsTimeline'
     $databasePath = Join-Path $artifactsTimelineDir 'ArtifactsTimeline.db'
@@ -2025,7 +2046,6 @@ function ExportTimelineArtifactsButton_Click {
 
     # Load System.Data.SQLite assembly in the main script
     $assemblyPath = $sqlitePathTextBox.Text.Trim().Trim('"')
-    Add-Type -Path $assemblyPath
 
     Update-Log "Starting Timeline Export..." "ProcessSystemTextBox"
 
@@ -2219,7 +2239,10 @@ function ProcessTimelineArtifactsButton_Click {
         return
     }
 	
-    Load-SQLiteDLL
+    if (-not (Load-SQLiteDLL)) {
+        [System.Windows.MessageBox]::Show("Failed to load System.Data.SQLite.dll. Check the selected path and try again.")
+        return
+    }
 
 	# Define paths
 	$artifactsTimelineDir = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\ArtifactsTimeline'
@@ -2239,7 +2262,6 @@ function ProcessTimelineArtifactsButton_Click {
 
     # Load System.Data.SQLite assembly in the main script
     $assemblyPath = $sqlitePathTextBox.Text.Trim().Trim('"')
-    Add-Type -Path $assemblyPath
 
     # Function to convert JSON to Hashtable
     function ConvertTo-Hashtable {
@@ -3338,17 +3360,17 @@ function ProcessTimelineArtifactsButton_Click {
                 # Load existing file hashes
                 $existingHashes = @{}
                 if (Test-Path -Path $HashLogPath) {
-                    $jsonObject = Get-Content -Path $HashLogPath | ConvertFrom-Json
-                    $existingHashes = ConvertTo-Hashtable -jsonObject $jsonObject
+                    try {
+                        $hashLogRaw = Get-Content -Path $HashLogPath -Raw
+                        if (-not [string]::IsNullOrWhiteSpace($hashLogRaw)) {
+                            $jsonObject = $hashLogRaw | ConvertFrom-Json
+                            $existingHashes = ConvertTo-Hashtable -jsonObject $jsonObject
+                        }
+                    } catch {
+                        Write-Log "Hash log could not be parsed. Rebuilding hash cache from scratch. Error: $_"
+                        $existingHashes = @{}
+                    }
                 }
-
-				# Process Tools
-				$tools = @{
-					Zimmermantools = $ZimmermanToolsPath
-					Chainsaw = $chainsawPath
-					Hayabusa = $hayabusaPath
-					Zircolite = $zircolitePath
-				}
 
 				# Process Tools
 				$tools = @{
@@ -3361,8 +3383,12 @@ function ProcessTimelineArtifactsButton_Click {
 				foreach ($tool in $tools.GetEnumerator()) {
 					if ($SelectedTools -contains $tool.Key) {
 						$toolPath = $tool.Value
+                        if ([string]::IsNullOrWhiteSpace($toolPath) -or -not (Test-Path -LiteralPath $toolPath -PathType Container)) {
+                            Write-Log "Tool output path does not exist for $($tool.Key): $toolPath"
+                            continue
+                        }
 						# Get all CSV files in the tool's output folder recursively
-						$csvFiles = Get-ChildItem -Path $toolPath -Filter *.csv -Recurse
+						$csvFiles = @(Get-ChildItem -Path $toolPath -Filter *.csv -Recurse -ErrorAction SilentlyContinue)
 						if ($csvFiles.Count -eq 0) {
 							Write-Log "No CSV files found in $toolPath"
 						} else {
