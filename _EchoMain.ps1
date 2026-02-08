@@ -1891,7 +1891,15 @@ $OSSelectionComboBox.Add_SelectionChanged({
 
 ####System processing event handlers####
 $TabProcessSystemArtifacts = $window.FindName("TabProcessSystemArtifacts")
-$TabProcessSystemArtifacts.Add_GotFocus({ OnTabProcessArtifacts_GotFocus })
+$TabProcessSystemArtifacts.AddHandler(
+    [System.Windows.Controls.Primitives.Selector]::SelectedEvent,
+    [System.Windows.RoutedEventHandler]{
+        param($sender, $e)
+        if (($e.OriginalSource -eq $TabProcessSystemArtifacts) -and $TabProcessSystemArtifacts.IsSelected) {
+            OnTabProcessArtifacts_GotFocus
+        }
+    }
+)
 $ArtifactProcessingPathTextBox = $window.FindName("ArtifactProcessingPathTextBox")
 $ArtifactProcessingPathButton = $window.FindName("ArtifactProcessingPathButton")
 $ProcessBulkExtractorButton = $window.FindName("ProcessBulkExtractorButton")
@@ -2312,17 +2320,35 @@ $allProcessingToolControls = @(
     $TimelineArtifactTextBlock
 )
 
+# Track currently visible controls so we only update what changed per selection.
+$script:currentProcessingVisibleControls = @()
+
 $ProcessingToolComboBox.Add_SelectionChanged({
     $selectedTool = $null
     if ($ProcessingToolComboBox.SelectedItem -and $ProcessingToolComboBox.SelectedItem.Content) {
         $selectedTool = [string]$ProcessingToolComboBox.SelectedItem.Content
     }
 
-    Set-ProcessingControlVisibility -Controls $allProcessingToolControls -Visibility 'Collapsed'
-
+    $newVisibleControls = @()
     if (-not [string]::IsNullOrWhiteSpace($selectedTool) -and $processingToolControlSets.ContainsKey($selectedTool)) {
-        Set-ProcessingControlVisibility -Controls $processingToolControlSets[$selectedTool] -Visibility 'Visible'
+        $newVisibleControls = @($processingToolControlSets[$selectedTool])
     }
+
+    $controlsToHide = @(
+        $script:currentProcessingVisibleControls | Where-Object { $newVisibleControls -notcontains $_ }
+    )
+    $controlsToShow = @(
+        $newVisibleControls | Where-Object { $script:currentProcessingVisibleControls -notcontains $_ }
+    )
+
+    if ($controlsToHide.Count -gt 0) {
+        Set-ProcessingControlVisibility -Controls $controlsToHide -Visibility 'Collapsed'
+    }
+    if ($controlsToShow.Count -gt 0) {
+        Set-ProcessingControlVisibility -Controls $controlsToShow -Visibility 'Visible'
+    }
+
+    $script:currentProcessingVisibleControls = $newVisibleControls
 })
 ####End System processing event handlers####
 
@@ -2793,7 +2819,15 @@ $TimesketchUserTextBox.Add_TextChanged({
 
 ####Threat Scanner Event handlers####
 $TabUseThreatScanners = $window.FindName("TabUseThreatScanners")
-$TabUseThreatScanners.Add_GotFocus({ OnTabThreatScanners_GotFocus })
+$TabUseThreatScanners.AddHandler(
+    [System.Windows.Controls.Primitives.Selector]::SelectedEvent,
+    [System.Windows.RoutedEventHandler]{
+        param($sender, $e)
+        if (($e.OriginalSource -eq $TabUseThreatScanners) -and $TabUseThreatScanners.IsSelected) {
+            OnTabThreatScanners_GotFocus
+        }
+    }
+)
 $ArtifactScanningPathTextBox = $window.FindName("ArtifactScanningPathTextBox")
 $ArtifactScanningPathButton = $window.FindName("ArtifactScanningPathButton")
 $ScanToolLocation = $window.FindName("ScanToolLocation")
@@ -2930,17 +2964,34 @@ $allThreatScannerControls = @(
     $UpdateLokiButton, $LokiUpdaterPathTextBox, $BrowseLokiUpdatePathButton, $LokiUpgraderLocation
 )
 
+$script:currentThreatScannerVisibleControls = @()
+
 $ThreatScanToolComboBox.Add_SelectionChanged({
     $selectedTool = $null
     if ($ThreatScanToolComboBox.SelectedItem -and $ThreatScanToolComboBox.SelectedItem.Content) {
         $selectedTool = [string]$ThreatScanToolComboBox.SelectedItem.Content
     }
 
-    Set-ProcessingControlVisibility -Controls $allThreatScannerControls -Visibility 'Collapsed'
-
+    $newVisibleControls = @()
     if (-not [string]::IsNullOrWhiteSpace($selectedTool) -and $threatScannerControlSets.ContainsKey($selectedTool)) {
-        Set-ProcessingControlVisibility -Controls $threatScannerControlSets[$selectedTool] -Visibility 'Visible'
+        $newVisibleControls = @($threatScannerControlSets[$selectedTool])
     }
+
+    $controlsToHide = @(
+        $script:currentThreatScannerVisibleControls | Where-Object { $newVisibleControls -notcontains $_ }
+    )
+    $controlsToShow = @(
+        $newVisibleControls | Where-Object { $script:currentThreatScannerVisibleControls -notcontains $_ }
+    )
+
+    if ($controlsToHide.Count -gt 0) {
+        Set-ProcessingControlVisibility -Controls $controlsToHide -Visibility 'Collapsed'
+    }
+    if ($controlsToShow.Count -gt 0) {
+        Set-ProcessingControlVisibility -Controls $controlsToShow -Visibility 'Visible'
+    }
+
+    $script:currentThreatScannerVisibleControls = $newVisibleControls
 })
 $ScanClamAVButton.Add_Click({ScanClamAVButton_Click })
 $ScanLokiButton.Add_Click({ScanLokiButton_Click })
