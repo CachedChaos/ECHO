@@ -48,9 +48,12 @@ function OnTabTabPageTools_GotFocus {
 
 function Add-ToolToCsv {
     param(
-        [string]$toolName
+        [string]$toolName,
+        [string]$filePath
     )
-    $filePath = Get-ChildItem -Path $toolsDirectory -Filter "$toolName" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    if ([string]::IsNullOrWhiteSpace($filePath)) {
+        $filePath = Get-ChildItem -Path $toolsDirectory -Filter "$toolName" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    }
 
     if ($null -ne $filePath -and (Test-Path $filePath)) {
         $csvPath = Join-Path $toolsDirectory "tools.csv"
@@ -867,14 +870,63 @@ function Download-Velociraptor {
     $tempFolder = Join-Path $toolsDirectory "TempVelociraptor"
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
-    # Get the latest release URL from GitHub API
-    $apiUrl = "https://api.github.com/repos/Velocidex/velociraptor/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^velociraptor-v.*amd64.exe$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    # ECHO currently depends on Velociraptor behavior that changed in 0.75+.
+    # Pin strictly to the newest stable 0.74 release line.
+    $allReleases = @()
+    for ($page = 1; $page -le 5; $page++) {
+        $apiUrl = "https://api.github.com/repos/Velocidex/velociraptor/releases?per_page=100&page=$page"
+        try {
+            $pageReleases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
+        } catch {
+            Update-Log "Failed to fetch Velociraptor releases: $_" "tabPageToolsTextBox"
+            return
+        }
+
+        if (-not $pageReleases -or $pageReleases.Count -eq 0) {
+            break
+        }
+
+        $allReleases += $pageReleases
+    }
+
+    $compatibleReleases = $allReleases | Where-Object {
+        -not $_.draft -and
+        -not $_.prerelease -and
+        ([string]$_.tag_name -match '^v?0\.74(\.\d+)?$')
+    }
+
+    if (-not $compatibleReleases -or $compatibleReleases.Count -eq 0) {
+        Update-Log "No compatible Velociraptor 0.74.x release found on GitHub." "tabPageToolsTextBox"
+        return
+    }
+
+    $selectedRelease = $compatibleReleases | Sort-Object -Descending -Property @{
+        Expression = {
+            $tag = [string]$_.tag_name
+            if ($tag -match '^v?0\.74(?:\.(\d+))?$') {
+                if ($matches[1]) { return [int]$matches[1] }
+                return 0
+            }
+            return -1
+        }
+    } | Select-Object -First 1
+
+    $downloadAsset = $selectedRelease.assets | Where-Object {
+        $_.name -match '^velociraptor-v0\.74(\.\d+)?[^\\\/]*amd64\.exe$'
+    } | Select-Object -First 1
+
+    if (-not $downloadAsset) {
+        $downloadAsset = $selectedRelease.assets | Where-Object {
+            $_.name -match 'amd64\.exe$'
+        } | Select-Object -First 1
+    }
+
+    $downloadUrl = if ($downloadAsset) { $downloadAsset.browser_download_url } else { $null }
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
-		Update-Log "Download URL for Velociraptor.exe not found." "tabPageToolsTextBox"
+		Update-Log "Download URL for Velociraptor.exe not found in release $($selectedRelease.tag_name)." "tabPageToolsTextBox"
 		return
 	}
+    Update-Log "Downloading Velociraptor $($selectedRelease.tag_name) (pinned to 0.74.x for current ECHO compatibility)." "tabPageToolsTextBox"
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
