@@ -191,7 +191,7 @@ function Download-7zip {
     $7zrPath = Join-Path $tempFolder "7zr.exe"
     $7zrUrl = "https://www.7-zip.org/a/7zr.exe"
    try {
-        Invoke-WebRequest -Uri $7zrUrl -OutFile $7zrPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $7zrUrl -OutFile $7zrPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download 7zip: $_" "tabPageToolsTextBox"
         return
@@ -201,7 +201,7 @@ function Download-7zip {
     $extra7zPath = Join-Path $tempFolder "7z2301-extra.7z"
     $extra7zUrl = "https://www.7-zip.org/a/7z2301-extra.7z"
     try {
-        Invoke-WebRequest -Uri $extra7zUrl -OutFile $extra7zPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $extra7zUrl -OutFile $extra7zPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download 7zip: $_" "tabPageToolsTextBox"
         return
@@ -245,7 +245,7 @@ function Download-BulkExtractor {
 
     # Download to temporary folder
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Bulk Extractor: $_" "tabPageToolsTextBox"
         return
@@ -306,7 +306,7 @@ function Download-chainsaw {
 	$downloadPath = Join-Path $tempFolder $originalFileName
 
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download chainsaw: $_" "tabPageToolsTextBox"
         return
@@ -369,7 +369,7 @@ function Download-ClamAV {
     # Retrieve the latest release page and parse the download URL
     $apiUrl = "$baseUrl/downloads"
     $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
-    $latestReleasePage = Invoke-WebRequest -Uri $apiUrl -Headers @{ "User-Agent" = $userAgent }
+    $latestReleasePage = Invoke-WebRequest -UseBasicParsing -Uri $apiUrl -Headers @{ "User-Agent" = $userAgent }
     $relativePath = $latestReleasePage.Links | Where-Object { $_.href -match 'clamav-\d+\.\d+\.\d+\.win\.x64\.zip$' } | Select-Object -ExpandProperty href -First 1
     
     # Check if a valid download path was retrieved
@@ -385,7 +385,7 @@ function Download-ClamAV {
     # Construct the full download URL
     $downloadUrl = $baseUrl + $relativePath
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download ClamAV: $_" "tabPageToolsTextBox"
         return
@@ -464,7 +464,7 @@ function Download-etl2pcapng {
 
     # Always download to temporary folder
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download et12pcapng: $_" "tabPageToolsTextBox"
         return
@@ -544,7 +544,7 @@ function Download-GeoLite2Databases {
 
         # Download database
         $downloadPath = Join-Path $tempFolder ("GeoLite2" + $db + ".tar.gz")
-        Invoke-WebRequest -Uri $dbUrls[$db] -OutFile $downloadPath
+        Invoke-WebRequest -UseBasicParsing -Uri $dbUrls[$db] -OutFile $downloadPath
 
         # Extract the downloaded database using 7zip
         Start-Process $zipPath -ArgumentList "x `"$downloadPath`" -o`"$tempFolder`" -y" -NoNewWindow -Wait
@@ -604,7 +604,7 @@ function Download-Hayabusa {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Hayabusa: $_" "tabPageToolsTextBox"
         return
@@ -682,7 +682,7 @@ function Download-Loki {
     $originalFileName = Split-Path -Leaf $downloadUrl
     $downloadPath = Join-Path $tempFolder $originalFileName
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Loki: $_" "tabPageToolsTextBox"
         return
@@ -760,7 +760,7 @@ function Download-Plaso {
 	# Download the plaso package
     $tarGzPath = Join-Path $tempFolder (Split-Path -Leaf $downloadUrl)
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tarGzPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $tarGzPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Plaso: $_" "tabPageToolsTextBox"
         return
@@ -930,7 +930,7 @@ function Download-Velociraptor {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Velociraptor: $_" "tabPageToolsTextBox"
         return
@@ -975,7 +975,7 @@ function Download-Volatility3 {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Volatility: $_" "tabPageToolsTextBox"
         return
@@ -1030,7 +1030,7 @@ function Download-winpmem {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download winpmem: $_" "tabPageToolsTextBox"
         return
@@ -1066,7 +1066,7 @@ function Download-ZimmermanTools {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download ZimmermanTools: $_" "tabPageToolsTextBox"
         return
@@ -1130,7 +1130,7 @@ function Download-Zircolite {
 	$downloadPath = Join-Path $tempFolder $originalFileName
 
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
+        Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Zircolite: $_" "tabPageToolsTextBox"
         return
@@ -1179,3 +1179,4 @@ function Download-Zircolite {
 }
 
 ####End functions for Tools Tab####
+
