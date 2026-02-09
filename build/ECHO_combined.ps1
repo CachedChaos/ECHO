@@ -8311,15 +8311,27 @@ function Start-ToolDownloadJob {
         [string]$GeoLiteLicenseKeyPlain
     )
 
-    if ([string]::IsNullOrWhiteSpace($script:toolManagementScriptPath) -or (-not (Test-Path -LiteralPath $script:toolManagementScriptPath -PathType Leaf -ErrorAction SilentlyContinue))) {
-        Update-Log "Tool download script path could not be resolved. Ensure ToolManagement.ps1 is available next to the application scripts." "tabPageToolsTextBox"
-        Set-ToolDownloadStatus -ToolName $SelectedOption -StatusText ("Failed ({0})" -f (Get-Date -Format "HH:mm:ss"))
-        Update-DownloadToolButtonState
-        return
+    $requiredFunctionNames = @(
+        "Invoke-ExternalProcessQuiet",
+        "Add-ToolToCsv",
+        "Test-InternetConnection"
+    )
+    $downloadFunctionNames = @(Get-Command -Name "Download-*" -CommandType Function -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+    if ($downloadFunctionNames.Count -gt 0) {
+        $requiredFunctionNames += $downloadFunctionNames
+    }
+    $requiredFunctionNames = @($requiredFunctionNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+
+    $embeddedFunctionDefinitions = @{}
+    foreach ($functionName in $requiredFunctionNames) {
+        $functionCommand = Get-Command -Name $functionName -CommandType Function -ErrorAction SilentlyContinue
+        if ($functionCommand -and $functionCommand.Definition) {
+            $embeddedFunctionDefinitions[$functionName] = $functionCommand.Definition
+        }
     }
 
     $job = Start-Job -ScriptBlock {
-        param($selectedTool, $toolsDir, $toolManagementPath, $geoLiteLicense)
+        param($selectedTool, $toolsDir, $toolManagementPath, $geoLiteLicense, $functionDefinitions)
 
         function Update-Log {
             param([string]$message, [string]$callerFunction)
@@ -8334,7 +8346,22 @@ function Start-ToolDownloadJob {
             $VerbosePreference = 'SilentlyContinue'
             $InformationPreference = 'SilentlyContinue'
             $global:toolsDirectory = $toolsDir
-            . $toolManagementPath
+
+            $loadedFromScriptPath = $false
+            if (-not [string]::IsNullOrWhiteSpace($toolManagementPath) -and (Test-Path -LiteralPath $toolManagementPath -PathType Leaf -ErrorAction SilentlyContinue)) {
+                . $toolManagementPath
+                $loadedFromScriptPath = $true
+            }
+
+            if (-not $loadedFromScriptPath) {
+                if ($functionDefinitions -and $functionDefinitions.Count -gt 0) {
+                    foreach ($entry in $functionDefinitions.GetEnumerator()) {
+                        Set-Item -Path ("Function:\{0}" -f $entry.Key) -Value $entry.Value
+                    }
+                } else {
+                    throw "Tool download functions are unavailable in this runtime. Rebuild ECHO so download functions are embedded."
+                }
+            }
 
             switch ($selectedTool) {
                 "7zip" { Download-7zip }
@@ -8366,7 +8393,7 @@ function Start-ToolDownloadJob {
             Write-Output ("Unhandled tool download error for {0}: {1}" -f $selectedTool, $_.Exception.Message)
             throw
         }
-    } -ArgumentList @($SelectedOption, $toolsDirectory, $script:toolManagementScriptPath, $GeoLiteLicenseKeyPlain)
+    } -ArgumentList @($SelectedOption, $toolsDirectory, $script:toolManagementScriptPath, $GeoLiteLicenseKeyPlain, $embeddedFunctionDefinitions)
 
     $Global:tooldownloadJobs += [PSCustomObject]@{
         JobObject = $job
