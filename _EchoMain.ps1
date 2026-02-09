@@ -1236,7 +1236,7 @@ function Update-Log {
 					<ComboBoxItem Content="ClamAV"/>
 					<ComboBoxItem Content="Loki"/>				
 				</ComboBox>			
-				<TextBlock x:Name="ScanToolLocation" Text="Scanning Tool Location" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,155,0,0" TextWrapping="Wrap" Width="740"/>
+				<TextBlock x:Name="ScanToolLocation" Text="Scanning Tool Location" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,155,0,0" TextWrapping="Wrap" Width="330"/>
 				<TextBlock x:Name="ScanningToolExtraArguments" Text="Extra Arguments (If any)" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,155,0,0" TextWrapping="Wrap" Width="740"/>
 				
 				<!-- ClamAV -->
@@ -2953,6 +2953,8 @@ $BrowseclamAVUpdatePathButton = $window.FindName("BrowseclamAVUpdatePathButton")
 $FreshclamLocation = $window.FindName("FreshclamLocation")
 $LokiUpgraderLocation = $window.FindName("LokiUpgraderLocation")
 $ArtifactScanningPathTextBox.Add_TextChanged({ UpdateScanningButtonsStatus })
+$ClamAVPathTextBox.Add_TextChanged({ UpdateScanningButtonsStatus })
+$LokiPathTextBox.Add_TextChanged({ UpdateScanningButtonsStatus })
 $LokiUpdaterPathTextBox.Add_TextChanged({ UpdateScanningButtonsStatus })
 $clamAVUpdaterPathTextBox.Add_TextChanged({ UpdateScanningButtonsStatus })
 $ArtifactScanningPathButton.Add_Click({
@@ -3005,30 +3007,162 @@ $ArtifactScanningPathButton.Add_Click({
 })
 
 $BrowseClamAVPathButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Filter = "clamdscan.exe file (*.exe)|*.exe"
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $ClamAVPathTextBox.Text = $dialog.FileName
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Select ClamAV Path Type'
+    $form.Size = New-Object System.Drawing.Size(460, 180)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = 'Choose executable or folder. Valid executable names: clamdscan.exe or clamscan.exe'
+    $label.Location = New-Object System.Drawing.Point(20, 20)
+    $label.Size = New-Object System.Drawing.Size(420, 40)
+    $form.Controls.Add($label)
+
+    $fileButton = New-Object System.Windows.Forms.Button
+    $fileButton.Text = 'Executable'
+    $fileButton.Location = New-Object System.Drawing.Point(110, 80)
+    $fileButton.Size = New-Object System.Drawing.Size(100, 25)
+    $fileButton.Add_Click({
+        $form.Tag = 'File'
+        $form.Close()
+    })
+    $form.Controls.Add($fileButton)
+
+    $folderButton = New-Object System.Windows.Forms.Button
+    $folderButton.Text = 'Folder'
+    $folderButton.Location = New-Object System.Drawing.Point(240, 80)
+    $folderButton.Size = New-Object System.Drawing.Size(100, 25)
+    $folderButton.Add_Click({
+        $form.Tag = 'Folder'
+        $form.Close()
+    })
+    $form.Controls.Add($folderButton)
+
+    $form.ShowDialog() | Out-Null
+
+    if ($form.Tag -eq 'File') {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Filter = "ClamAV scanner executables (clamdscan.exe;clamscan.exe)|clamdscan.exe;clamscan.exe|Executable files (*.exe)|*.exe"
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $ClamAVPathTextBox.Text = $dialog.FileName
+        }
+    } elseif ($form.Tag -eq 'Folder') {
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $ClamAVPathTextBox.Text = $dialog.SelectedPath
+        }
     }
+
+    UpdateScanningButtonsStatus
 })
 
 $BrowseLokiPathButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Filter = "loki.exe file (*.exe)|*.exe"
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $LokiPathTextBox.Text = $dialog.FileName
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Select Loki Path Type'
+    $form.Size = New-Object System.Drawing.Size(430, 170)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = 'Choose executable or folder. Valid executable name: loki.exe'
+    $label.Location = New-Object System.Drawing.Point(20, 20)
+    $label.Size = New-Object System.Drawing.Size(390, 30)
+    $form.Controls.Add($label)
+
+    $fileButton = New-Object System.Windows.Forms.Button
+    $fileButton.Text = 'Executable'
+    $fileButton.Location = New-Object System.Drawing.Point(100, 75)
+    $fileButton.Size = New-Object System.Drawing.Size(95, 25)
+    $fileButton.Add_Click({
+        $form.Tag = 'File'
+        $form.Close()
+    })
+    $form.Controls.Add($fileButton)
+
+    $folderButton = New-Object System.Windows.Forms.Button
+    $folderButton.Text = 'Folder'
+    $folderButton.Location = New-Object System.Drawing.Point(225, 75)
+    $folderButton.Size = New-Object System.Drawing.Size(95, 25)
+    $folderButton.Add_Click({
+        $form.Tag = 'Folder'
+        $form.Close()
+    })
+    $form.Controls.Add($folderButton)
+
+    $form.ShowDialog() | Out-Null
+
+    if ($form.Tag -eq 'File') {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Filter = "Loki executable (loki.exe)|loki.exe|Executable files (*.exe)|*.exe"
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $LokiPathTextBox.Text = $dialog.FileName
+        }
+    } elseif ($form.Tag -eq 'Folder') {
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $LokiPathTextBox.Text = $dialog.SelectedPath
+        }
     }
+
+    UpdateScanningButtonsStatus
 })
 
 $BrowseLokiUpdatePathButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Filter = "loki-upgrader.exe file (*.exe)|*.exe"
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $LokiUpdaterPathTextBox.Text = $dialog.FileName
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'Select Loki Upgrader Path Type'
+    $form.Size = New-Object System.Drawing.Size(470, 170)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = 'Choose executable or folder. Valid executable name: loki-upgrader.exe'
+    $label.Location = New-Object System.Drawing.Point(20, 20)
+    $label.Size = New-Object System.Drawing.Size(430, 30)
+    $form.Controls.Add($label)
+
+    $fileButton = New-Object System.Windows.Forms.Button
+    $fileButton.Text = 'Executable'
+    $fileButton.Location = New-Object System.Drawing.Point(120, 75)
+    $fileButton.Size = New-Object System.Drawing.Size(95, 25)
+    $fileButton.Add_Click({
+        $form.Tag = 'File'
+        $form.Close()
+    })
+    $form.Controls.Add($fileButton)
+
+    $folderButton = New-Object System.Windows.Forms.Button
+    $folderButton.Text = 'Folder'
+    $folderButton.Location = New-Object System.Drawing.Point(245, 75)
+    $folderButton.Size = New-Object System.Drawing.Size(95, 25)
+    $folderButton.Add_Click({
+        $form.Tag = 'Folder'
+        $form.Close()
+    })
+    $form.Controls.Add($folderButton)
+
+    $form.ShowDialog() | Out-Null
+
+    if ($form.Tag -eq 'File') {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Filter = "Loki upgrader executable (loki-upgrader.exe)|loki-upgrader.exe|Executable files (*.exe)|*.exe"
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $LokiUpdaterPathTextBox.Text = $dialog.FileName
+        }
+    } elseif ($form.Tag -eq 'Folder') {
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $LokiUpdaterPathTextBox.Text = $dialog.SelectedPath
+        }
     }
+
+    UpdateScanningButtonsStatus
 })
 
 $BrowseclamAVUpdatePathButton.Add_Click({
@@ -3042,7 +3176,7 @@ $BrowseclamAVUpdatePathButton.Add_Click({
 
 $threatScannerControlSets = @{
     "ClamAV" = @(
-        $ScanToolLocation, $ScanningToolExtraArguments,
+        $ScanToolLocation,
         $ScanClamAVButton, $ClamAVPathTextBox, $BrowseClamAVPathButton, $ClamAVTextBlock,
         $UpdateclamAVButton, $clamAVUpdaterPathTextBox, $BrowseclamAVUpdatePathButton, $FreshclamLocation
     )
@@ -3082,6 +3216,16 @@ $ThreatScanToolComboBox.Add_SelectionChanged({
     }
 
     $script:currentThreatScannerVisibleControls = $newVisibleControls
+
+    if ($selectedTool -eq "ClamAV") {
+        $ScanToolLocation.Text = "Scanning Tool Location"
+    } elseif ($selectedTool -eq "Loki") {
+        $ScanToolLocation.Text = "Scanning Tool Location"
+    } else {
+        $ScanToolLocation.Text = "Scanning Tool Location"
+    }
+
+    UpdateScanningButtonsStatus
 })
 $ScanClamAVButton.Add_Click({ScanClamAVButton_Click })
 $ScanLokiButton.Add_Click({ScanLokiButton_Click })

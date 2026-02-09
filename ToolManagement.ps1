@@ -3,7 +3,41 @@ $global:hasRunOnTabPageTools = $false
 #Timer for downloading tools
 $Global:tooldownloadJobs = @()
 $Global:toolDownloadStatuses = @{}
-$script:toolManagementScriptPath = Join-Path $PSScriptRoot "ToolManagement.ps1"
+
+function Resolve-ToolManagementScriptPath {
+    $candidateRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        $candidateRoots += $PSScriptRoot
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        try {
+            $candidateRoots += (Split-Path -Parent $PSCommandPath)
+        } catch { }
+    }
+    $baseDirectory = [System.AppDomain]::CurrentDomain.BaseDirectory
+    if (-not [string]::IsNullOrWhiteSpace($baseDirectory)) {
+        $candidateRoots += $baseDirectory
+    }
+
+    foreach ($root in $candidateRoots) {
+        try {
+            if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
+                continue
+            }
+
+            $candidate = Join-Path -Path $root -ChildPath "ToolManagement.ps1"
+            if (Test-Path -LiteralPath $candidate -PathType Leaf -ErrorAction SilentlyContinue) {
+                return $candidate
+            }
+        } catch {
+            continue
+        }
+    }
+
+    return $null
+}
+
+$script:toolManagementScriptPath = Resolve-ToolManagementScriptPath
 $tooldownloadJobTimer = New-Object System.Windows.Forms.Timer
 $tooldownloadJobTimer.Interval = 2000
 $tooldownloadJobTimer.Add_Tick({
@@ -169,6 +203,13 @@ function Start-ToolDownloadJob {
         [string]$SelectedOption,
         [string]$GeoLiteLicenseKeyPlain
     )
+
+    if ([string]::IsNullOrWhiteSpace($script:toolManagementScriptPath) -or (-not (Test-Path -LiteralPath $script:toolManagementScriptPath -PathType Leaf -ErrorAction SilentlyContinue))) {
+        Update-Log "Tool download script path could not be resolved. Ensure ToolManagement.ps1 is available next to the application scripts." "tabPageToolsTextBox"
+        Set-ToolDownloadStatus -ToolName $SelectedOption -StatusText ("Failed ({0})" -f (Get-Date -Format "HH:mm:ss"))
+        Update-DownloadToolButtonState
+        return
+    }
 
     $job = Start-Job -ScriptBlock {
         param($selectedTool, $toolsDir, $toolManagementPath, $geoLiteLicense)
