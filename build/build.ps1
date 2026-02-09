@@ -40,5 +40,28 @@ foreach ($file in $files) {
     }
 }
 
+# Validate combined output contains critical runtime fixes and no known stale patterns.
+$combinedContent = Get-Content -Path $output -Raw
+$requiredMarkers = @(
+    'Resolve-Etl2PcapngExecutablePath',
+    'downloadFunctionNames = @(Get-Command -Name "Download-*"',
+    'Global\ECHO_ClamAV_DaemonLock'
+)
+$forbiddenMarkers = @(
+    'Tool download script path could not be resolved. Ensure ToolManagement.ps1 is available next to the application scripts.',
+    'Start-PacketCaptureJob -TraceCommand'
+)
+
+foreach ($marker in $requiredMarkers) {
+    if ($combinedContent -notlike "*$marker*") {
+        throw "Build validation failed: missing required marker in ECHO_combined.ps1 -> $marker"
+    }
+}
+foreach ($marker in $forbiddenMarkers) {
+    if ($combinedContent -like "*$marker*") {
+        throw "Build validation failed: found forbidden stale marker in ECHO_combined.ps1 -> $marker"
+    }
+}
+
 # Call PS2EXE (adjust icon path if needed)
 Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6.3' -product 'Evidence Handling & Processing Orchestrator'
