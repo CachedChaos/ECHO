@@ -35,12 +35,42 @@ if (-not (Test-Path $casesCsvPath)) {
 }
 
 function Check-PythonInstalled {
-    try {
-        $pythonVersion = python --version 2>&1
-        return $true
-    } catch {
-        return $false
+    return $null -ne (Get-PythonCommand)
+}
+
+function Get-PythonCommand {
+    $candidates = @(
+        @{ Command = "python";  PrefixArgs = @() },
+        @{ Command = "python3"; PrefixArgs = @() },
+        @{ Command = "py";      PrefixArgs = @("-3") }
+    )
+
+    foreach ($candidate in $candidates) {
+        $commandName = $candidate.Command
+        $resolvedCommand = Get-Command -Name $commandName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $resolvedCommand) {
+            continue
+        }
+
+        try {
+            $testArgs = @()
+            if ($candidate.PrefixArgs -and $candidate.PrefixArgs.Count -gt 0) {
+                $testArgs += $candidate.PrefixArgs
+            }
+            $testArgs += "--version"
+            $null = & $resolvedCommand.Name @testArgs 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                return [PSCustomObject]@{
+                    Command = $resolvedCommand.Name
+                    PrefixArgs = @($candidate.PrefixArgs)
+                }
+            }
+        } catch {
+            continue
+        }
     }
+
+    return $null
 }
 
 function Get-CaseMetadataPath {
@@ -686,12 +716,21 @@ function ImportCaseButton_Click {
 }
 
 function PopulateCaseControls {
+    param(
+        [switch]$SkipStatusChecks
+    )
+
 	$cases = @(Get-Cases | ForEach-Object {
+        $caseStatus = "Exists"
+        if (-not $SkipStatusChecks) {
+            $caseStatus = if (Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path) { "Exists" } else { "Missing" }
+        }
+
 		[PSCustomObject]@{
 			Name    = $_.Name
 			Path    = $_.Path
 			Created = $_.Created
-			Status  = if (Test-CaseRecordIsUsable -CaseName $_.Name -CasePath $_.Path) { "Exists" } else { "Missing" }
+			Status  = $caseStatus
 		}
 	})
 
@@ -701,7 +740,10 @@ function PopulateCaseControls {
     # Populate the combo box with all cases (both "Exists" and "Missing")
     $existingCasesComboBox.Items.Clear()
     foreach ($case in $cases) {
-        $statusText = if ($case.Status -eq "Exists") { "" } else { " (Missing)" }
+        $statusText = ""
+        if ((-not $SkipStatusChecks) -and ($case.Status -ne "Exists")) {
+            $statusText = " (Missing)"
+        }
         $displayText = "$($case.Name) | $($case.Path)$statusText"
         [void]$existingCasesComboBox.Items.Add($displayText)
     }
@@ -1643,6 +1685,14 @@ $TabsSelectionComboBox.Add_SelectionChanged({
 $window.Add_Loaded({
     $TabsSelectionComboBox = $window.FindName("TabsSelectionComboBox")
     $TabsSelectionComboBox.SelectedItem = $TabsSelectionComboBox.Items | Where-Object { $_.Content -eq "Home" }
+
+    # Defer initial case list population until after first render to reduce startup blocking.
+    $null = $window.Dispatcher.BeginInvoke(
+        [System.Action]{
+            PopulateCaseControls -SkipStatusChecks
+        },
+        [System.Windows.Threading.DispatcherPriority]::Background
+    )
 })
 ####End Home tab Event Handlers####
 
@@ -1830,20 +1880,68 @@ $BrowseVolatilityPathButton = $window.FindName("BrowseVolatilityPathButton")
 $VolatilityPathTextBox = $window.FindName("VolatilityPathTextBox")
 $OSSelectionComboBox = $window.FindName("OSSelectionComboBox")
 $PluginsComboBox = $window.FindName("PluginsComboBox")
+$SelectMemoryPathTypeForm = {
+    param([string]$Title, [string]$PromptText)
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = $Title
+    $form.Size = New-Object System.Drawing.Size(460, 180)
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $PromptText
+    $label.Location = New-Object System.Drawing.Point(20, 20)
+    $label.Size = New-Object System.Drawing.Size(420, 40)
+    $form.Controls.Add($label)
+
+    $fileButton = New-Object System.Windows.Forms.Button
+    $fileButton.Text = 'Executable'
+    $fileButton.Location = New-Object System.Drawing.Point(110, 80)
+    $fileButton.Size = New-Object System.Drawing.Size(100, 25)
+    $fileButton.Add_Click({
+        $form.Tag = 'File'
+        $form.Close()
+    })
+    $form.Controls.Add($fileButton)
+
+    $folderButton = New-Object System.Windows.Forms.Button
+    $folderButton.Text = 'Folder'
+    $folderButton.Location = New-Object System.Drawing.Point(240, 80)
+    $folderButton.Size = New-Object System.Drawing.Size(100, 25)
+    $folderButton.Add_Click({
+        $form.Tag = 'Folder'
+        $form.Close()
+    })
+    $form.Controls.Add($folderButton)
+
+    $form.ShowDialog() | Out-Null
+    return $form.Tag
+}
+
 $BrowseWimpmemPathButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Filter = "Winpmem files (*.exe)|*.exe" 
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $WinpmemPathTextBox.Text = $dialog.FileName
+    $selectionType = & $SelectMemoryPathTypeForm "Select Winpmem Path Type" "Choose executable or folder. Valid executable name pattern: winpmem*.exe"
+
+    if ($selectionType -eq 'File') {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Filter = "Winpmem executable (winpmem*.exe)|winpmem*.exe|Executable files (*.exe)|*.exe"
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $WinpmemPathTextBox.Text = $dialog.FileName
+        }
+    } elseif ($selectionType -eq 'Folder') {
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $WinpmemPathTextBox.Text = $dialog.SelectedPath
+        }
     }
+
+    Update-MemoryButtonStates
 })
 
 $WinpmemPathTextBox.Add_TextChanged({
-    $isValidPath = -not [string]::IsNullOrEmpty($WinpmemPathTextBox.Text) -and 
-                   ($WinpmemPathTextBox.Text -match "winpmem.*\.exe$") -and 
-                   (Test-Path $WinpmemPathTextBox.Text)
-    $StartMemoryCaptureButton.IsEnabled = $isValidPath
+    Update-MemoryButtonStates
 })
 
 $BrowseMemoryPathButton.Add_Click({
@@ -1852,27 +1950,33 @@ $BrowseMemoryPathButton.Add_Click({
     $result = $dialog.ShowDialog()
     if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         $MemoryPathTextBox.Text = $dialog.FileName
-		$ProcessVolatilityButton.IsEnabled = Test-Path $dialog.FileName
     }
+    Update-MemoryButtonStates
 })
 
 $BrowseVolatilityPathButton.Add_Click({
-    $dialog = New-Object System.Windows.Forms.OpenFileDialog
-    $dialog.Filter = "vol.py file (*.py)|*.py"
-    $result = $dialog.ShowDialog()
-    if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-        $VolatilityPathTextBox.Text = $dialog.FileName
-        $ProcessVolatilityButton.IsEnabled = Test-Path $dialog.FileName
+    $selectionType = & $SelectMemoryPathTypeForm "Select Volatility Path Type" "Choose executable or folder. Valid file name: vol.py"
+
+    if ($selectionType -eq 'File') {
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Filter = "Volatility script (vol.py)|vol.py|Python files (*.py)|*.py"
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $VolatilityPathTextBox.Text = $dialog.FileName
+        }
+    } elseif ($selectionType -eq 'Folder') {
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $VolatilityPathTextBox.Text = $dialog.SelectedPath
+        }
     }
+
+    Update-MemoryButtonStates
 })
 
 $VolatilityPathTextBox.Add_TextChanged({
-    # Validate the path before enabling the Convert button
-    $isValidPath = -not [string]::IsNullOrEmpty($VolatilityPathTextBox.Text) -and 
-                   $VolatilityPathTextBox.Text.EndsWith("vol.py") -and 
-                   (Test-Path $VolatilityPathTextBox.Text)
-    $ProcessVolatilityButton.IsEnabled = $isValidPath
+    Update-MemoryButtonStates
 })
+$MemoryPathTextBox.Add_TextChanged({ Update-MemoryButtonStates })
 $osselections = @("Windows", "Linux", "Mac")
 foreach	($osselection in $osselections) {
 	$null = $OSSelectionComboBox.Items.Add($osselection)
@@ -1893,7 +1997,9 @@ $OSSelectionComboBox.Add_SelectionChanged({
     }
 
     $PluginsComboBox.SelectedIndex = 0
+    Update-MemoryButtonStates
 })
+$PluginsComboBox.Add_SelectionChanged({ Update-MemoryButtonStates })
 ####END Memory Capture event handlers####
 
 ####System processing event handlers####
@@ -3779,9 +3885,6 @@ $queryMapping = @{
 }
 
 ####End Elastic Search event handlers####
-
-# Populate the controls with existing cases
-PopulateCaseControls
 
 $window.Add_Closed({
     Exit-Program
