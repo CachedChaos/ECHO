@@ -58,8 +58,11 @@ $volJobTimer.Interval = 2000
 $volJobTimer.Add_Tick({
     Check-VolJobStatus
 })
+$Global:volJobs = @()
 $Global:volPendingJobs = @()
 $Global:volMaxParallel = 2
+$Global:volRequestCounter = 0
+$Global:volRequestTracker = @{}
 
 function Test-VolatilityProcessingActive {
     $runningCount = 0
@@ -336,6 +339,21 @@ function Check-VolJobStatus {
                         }
                     }
                 }
+                if ($job.RequestId -and $Global:volRequestTracker.ContainsKey($job.RequestId)) {
+                    $requestRecord = $Global:volRequestTracker[$job.RequestId]
+                    if ($updatedJob.State -eq "Completed") {
+                        $requestRecord.Completed = [int]$requestRecord.Completed + 1
+                    } else {
+                        $requestRecord.Failed = [int]$requestRecord.Failed + 1
+                    }
+
+                    $finishedCount = [int]$requestRecord.Completed + [int]$requestRecord.Failed
+                    if (-not $requestRecord.Logged -and $finishedCount -ge [int]$requestRecord.Total) {
+                        Update-Log ("Volatility request #{0} completed: {1}/{2} succeeded, {3} failed [{4}]" -f $requestRecord.Id, $requestRecord.Completed, $requestRecord.Total, $requestRecord.Failed, $requestRecord.Label) "MemoryTextBox"
+                        $requestRecord.Logged = $true
+                    }
+                    $Global:volRequestTracker[$job.RequestId] = $requestRecord
+                }
                 $job.DataAdded = $true
             }
 
@@ -356,18 +374,13 @@ function Check-VolJobStatus {
 
     if ($Global:volJobs.Count -eq 0 -and $Global:volPendingJobs.Count -eq 0) {
         Update-Log "All jobs completed." "MemoryTextBox"
+        $Global:volRequestTracker = @{}
         $volJobTimer.Stop() # Stop the timer after all jobs are completed
     }
 }
 
 function ProcessVolatilityButton_Click {
     Update-Log "Processing Memory..." "MemoryTextBox"
-
-    if (Test-VolatilityProcessingActive) {
-        [System.Windows.MessageBox]::Show("Volatility processing is already running. Please wait until current plugins complete.")
-        Update-Log "Volatility processing request ignored because another run is still active." "MemoryTextBox"
-        return
-    }
 
     # Validations
     if (-not $MemoryPathTextBox.Text -or -not $OSSelectionComboBox.SelectedItem -or -not $PluginsComboBox.SelectedItem) {
@@ -398,10 +411,32 @@ function ProcessVolatilityButton_Click {
         [System.Windows.MessageBox]::Show("Volatility path must point to vol.py.")
         return
     }
-	
+
+    $appendToQueue = Test-VolatilityProcessingActive
+    if (-not $appendToQueue) {
+        foreach ($existingJob in @($Global:volJobs)) {
+            $updated = Get-Job -Id $existingJob.JobObject.Id -ErrorAction SilentlyContinue
+            if ($updated -and ($updated.State -eq "Running" -or $updated.State -eq "NotStarted")) {
+                $appendToQueue = $true
+                break
+            }
+        }
+        if (-not $appendToQueue -and @($Global:volPendingJobs).Count -gt 0) {
+            $appendToQueue = $true
+        }
+    }
+
+    $requestLabel = "{0} | {1} | {2}" -f (Split-Path $memoryFilePath -Leaf), $selectedOs, $selectedPlugin
     Update-Log ("Using Python interpreter: {0} {1}" -f $pythonCommandInfo.Command, (($pythonCommandInfo.PrefixArgs -join ' ').Trim())) "MemoryTextBox"
-    Process-Volatility -MemoryFilePath $memoryFilePath -OS $selectedOs -Plugin $selectedPlugin -VolatilityPath $volatilityPath -PythonCommand $pythonCommandInfo.Command -PythonPrefixArgs $pythonCommandInfo.PrefixArgs
-	$volJobTimer.Start() # Start the timer when processing begins
+    Process-Volatility -MemoryFilePath $memoryFilePath -OS $selectedOs -Plugin $selectedPlugin -VolatilityPath $volatilityPath -PythonCommand $pythonCommandInfo.Command -PythonPrefixArgs $pythonCommandInfo.PrefixArgs -AppendToQueue:$appendToQueue -RequestLabel $requestLabel
+    if ($appendToQueue) {
+        Update-Log ("Volatility request queued. {0}" -f (Get-VolatilityActivePluginSummary)) "MemoryTextBox"
+    } else {
+        Update-Log (Get-VolatilityActivePluginSummary) "MemoryTextBox"
+    }
+    if (-not $volJobTimer.Enabled) {
+        $volJobTimer.Start() # Start timer when processing is active.
+    }
 }
 
 function Process-Volatility {
@@ -411,10 +446,27 @@ function Process-Volatility {
         [string]$Plugin,
 		[string]$VolatilityPath,
         [string]$PythonCommand,
-        [string[]]$PythonPrefixArgs
+        [string[]]$PythonPrefixArgs,
+        [switch]$AppendToQueue,
+        [string]$RequestLabel
     )
-	
-    $Global:volJobs = @()
+
+    $hasActiveOrQueuedWork = $false
+    foreach ($existingJob in @($Global:volJobs)) {
+        $updated = Get-Job -Id $existingJob.JobObject.Id -ErrorAction SilentlyContinue
+        if ($updated -and ($updated.State -eq "Running" -or $updated.State -eq "NotStarted")) {
+            $hasActiveOrQueuedWork = $true
+            break
+        }
+    }
+    if ($hasActiveOrQueuedWork -or @($Global:volPendingJobs).Count -gt 0) {
+        $AppendToQueue = $true
+    }
+    if (-not $AppendToQueue) {
+        # Do not reset $Global:volJobs here; completed job output may still need to be drained/logged
+        # by Check-VolJobStatus. Only reset pending queue for a fresh request.
+        $Global:volPendingJobs = @()
+    }
 	
 	$memorySubDirectory = Join-Path $global:currentcasedirectory "MemoryArtifacts"
 	if ([string]::IsNullOrWhiteSpace($memoryFilePath)) {
@@ -431,6 +483,21 @@ function Process-Volatility {
     }
 
 	$pluginToRun = if ($Plugin -eq "All Plugins") { $selectedPlugins } else { @{$Plugin = $selectedPlugins[$Plugin]} }
+    $requestPluginCount = @($pluginToRun.Keys).Count
+    $requestId = [int]$Global:volRequestCounter + 1
+    $Global:volRequestCounter = $requestId
+    if ([string]::IsNullOrWhiteSpace($RequestLabel)) {
+        $RequestLabel = "{0} | {1} | {2}" -f (Split-Path $MemoryFilePath -Leaf), $OS, $Plugin
+    }
+    $Global:volRequestTracker[$requestId] = [PSCustomObject]@{
+        Id = $requestId
+        Label = $RequestLabel
+        Total = $requestPluginCount
+        Completed = 0
+        Failed = 0
+        Logged = $false
+    }
+    Update-Log ("Queued Volatility request #{0}: {1} plugin(s) [{2}]" -f $requestId, $requestPluginCount, $RequestLabel) "MemoryTextBox"
 
     # Run the selected plugins
     $memoryFileName = (Split-Path $memoryFilePath -Leaf).TrimEnd('.raw')
@@ -443,9 +510,10 @@ function Process-Volatility {
     $Global:volMaxParallel = [int]$maxParallel
     Update-Log "Volatility parallel workers: $($Global:volMaxParallel)" "MemoryTextBox"
 
-    $Global:volPendingJobs = @()
+    $newPendingJobs = @()
     foreach ($pluginName in $pluginToRun.Keys) {
-        $Global:volPendingJobs += [PSCustomObject]@{
+        $newPendingJobs += [PSCustomObject]@{
+            RequestId = $requestId
             PluginName = $pluginName
             Plugin = $pluginToRun[$pluginName]
             VolatilityPath = $VolatilityPath
@@ -454,6 +522,12 @@ function Process-Volatility {
             PythonCommand = $PythonCommand
             PythonPrefixArgs = $PythonPrefixArgs
         }
+    }
+
+    if ($AppendToQueue) {
+        $Global:volPendingJobs = @($Global:volPendingJobs + $newPendingJobs)
+    } else {
+        $Global:volPendingJobs = @($newPendingJobs)
     }
 
     Start-NextVolatilityJobs
@@ -542,6 +616,7 @@ function Start-NextVolatilityJobs {
 
         $Global:volJobs += [PSCustomObject]@{
             JobObject = $job
+            RequestId = $next.RequestId
             PluginName = $next.PluginName
             DataAdded = $false
             HasDetailedCompletionOutput = $false
