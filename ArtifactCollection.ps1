@@ -58,6 +58,10 @@ function OnTabCollectSystemArtifacts_GotFocus {
 	if ($global:hasRunOnTabCollectSystemArtifacts) {
         return
     }    	
+    if (Get-Command -Name Initialize-SystemArtifactsTargetList -ErrorAction SilentlyContinue) {
+        Initialize-SystemArtifactsTargetList
+    }
+
     $subDirectoryPath = Join-Path $global:currentcasedirectory "SystemArtifacts"
 
     # Check if the subdirectory exists, if not, create it

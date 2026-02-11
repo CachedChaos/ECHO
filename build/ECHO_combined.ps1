@@ -61,6 +61,10 @@ function OnTabCollectSystemArtifacts_GotFocus {
 	if ($global:hasRunOnTabCollectSystemArtifacts) {
         return
     }    	
+    if (Get-Command -Name Initialize-SystemArtifactsTargetList -ErrorAction SilentlyContinue) {
+        Initialize-SystemArtifactsTargetList
+    }
+
     $subDirectoryPath = Join-Path $global:currentcasedirectory "SystemArtifacts"
 
     # Check if the subdirectory exists, if not, create it
@@ -3927,6 +3931,10 @@ function OnTabElasticSearch_GotFocus {
 }
 
 function ElasticSearchButton_Click {
+    if (Get-Command -Name Ensure-ElasticLookupDataLoaded -ErrorAction SilentlyContinue) {
+        Ensure-ElasticLookupDataLoaded
+    }
+
     $baseKibanaUrl = $ElasticURLPathTextBox.Text.Trim().TrimEnd('/')
     # Ensure the URL starts with http:// or https://
     if (-not $baseKibanaUrl.StartsWith("http://") -and -not $baseKibanaUrl.StartsWith("https://")) {
@@ -3943,7 +3951,7 @@ function ElasticSearchButton_Click {
 
 	$selectedQueryKey = $selectedItem.ToString()
 	
-	$selectedItemDetails = $queryMapping[$selectedQueryKey]
+	$selectedItemDetails = $script:queryMapping[$selectedQueryKey]
 	if ($selectedItemDetails -eq $null) {
 		[System.Windows.MessageBox]::Show("Selected query not found in query mapping.")
 		return
@@ -8524,6 +8532,7 @@ function Upgrade-Loki {
 # ---- ToolManagement.ps1 ----
 
 $global:hasRunOnTabPageTools = $false
+$script:hasSyncedToolsInventory = $false
 
 #Timer for downloading tools
 $Global:tooldownloadJobs = @()
@@ -8882,6 +8891,10 @@ function Check-tooldownloadJobStatus {
 
 function OnTabTabPageTools_GotFocus {
     if ($global:hasRunOnTabPageTools) {
+        if (-not $script:hasSyncedToolsInventory) {
+            Sync-ToolsInventoryCsv
+            $script:hasSyncedToolsInventory = $true
+        }
         Update-SelectedToolDownloadStatus
         Update-DownloadToolButtonState
         return
@@ -8891,9 +8904,39 @@ function OnTabTabPageTools_GotFocus {
         New-Item -ItemType Directory -Path $toolsDirectory | Out-Null
         Update-Log "Subdirectory 'Tools' created successfully." "tabPageToolsTextBox"
     }
-		$global:hasRunOnTabPageTools = $true
+	$global:hasRunOnTabPageTools = $true
+    if (-not $script:hasSyncedToolsInventory) {
+        Sync-ToolsInventoryCsv
+        $script:hasSyncedToolsInventory = $true
+    }
     Update-SelectedToolDownloadStatus
     Update-DownloadToolButtonState
+}
+
+function Sync-ToolsInventoryCsv {
+    $toolPatterns = @(
+        "7za.exe",
+        "bulk_extractor64.exe",
+        "chainsaw*.exe",
+        "clamdscan.exe",
+        "etl2pcapng.exe",
+        "ftkimager.exe",
+        "GeoLite2-City.mmdb",
+        "GeoLite2-ASN.mmdb",
+        "GeoLite2-Country.mmdb",
+        "Get-ZimmermanTools.ps1",
+        "hayabusa*.exe",
+        "log2timeline.py",
+        "loki.exe",
+        "Velociraptor*.exe",
+        "vol.py",
+        "winpmem*.exe",
+        "zircolite*.exe"
+    )
+
+    foreach ($pattern in $toolPatterns) {
+        Add-ToolToCsv -toolName $pattern
+    }
 }
 
 function Add-ToolToCsv {
@@ -10122,6 +10165,7 @@ function Download-Zircolite {
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName PresentationFramework
+
 
 
 $executableDirectory = [System.AppDomain]::CurrentDomain.BaseDirectory
@@ -11928,19 +11972,32 @@ $volumeComboBox.Add_SelectionChanged({
 $collectWithVelociraptorButton.Add_Click({
     Collect-Velociraptor
 })
-$items = @("_BasicCollection", "_KapeTriage", "_SANS_Triage", "_Boot", "_J", "_LogFile", "_MFT", "_MFTMirr", "_SDS", "_T", "1Password", "4KVideoDownloader", "AVG", "AceText", "AcronisTrueImage", "ActiveDirectoryNTDS", "ActiveDirectorySysvol", "AgentRansack", "Amcache", "Ammyy", "Antivirus", "AnyDesk", "ApacheAccessLog", "AppCompatPCA", "AppData", "AppXPackages", "ApplicationEvents", "AsperaConnect", "AssetAdvisorLog", "AteraAgent", "Avast", "AviraAVLogs", "BCD", "BITS", "BitTorrent", "Bitdefender", "BoxDrive_Metadata", "BoxDrive_UserFiles", "BraveBrowser", "BrowserCache", "CertUtil", "Chrome", "ChromeExtensions", "ChromeFileSystem", "CiscoJabber", "ClipboardMaster", "CloudStorage_All", "CloudStorage_Metadata", "CloudStorage_OneDriveExplorer", "CombinedLogs", "Combofix", "ConfluenceLogs", "Cybereason", "Cylance", "DC__", "DWAgent", "Debian", "DirectoryOpus", "DirectoryTraversal_AudioFiles", "DirectoryTraversal_ExcelDocuments", "DirectoryTraversal_PDFDocuments", "DirectoryTraversal_PictureFiles", "DirectoryTraversal_SQLiteDatabases", "DirectoryTraversal_VideoFiles", "DirectoryTraversal_WildCardExample", "DirectoryTraversal_WordDocuments", "Discord", "DoubleCommander", "Drivers", "Dropbox_Metadata", "Dropbox_UserFiles", "EFCommander", "ESET", "Edge", "EdgeChromium", "Emsisoft", "EncapsulationLogging", "EventLogs_RDP", "EventLogs", "EventTraceLogs", "EventTranscriptDB", "Evernote", "Everything__VoidTools_", "EvidenceOfExecution", "Exchange", "ExchangeClientAccess", "ExchangeCve_2021_26855", "ExchangeTransport", "FSecure", "FTPClients", "Fences", "FileExplorerReplacements", "FileSystem", "FileZillaClient", "FileZillaServer", "Firefox", "FreeCommander", "FreeDownloadManager", "FreeFileSync", "Freenet", "FrostWire", "Gigatribe", "GoogleDriveBackupSync_UserFiles", "GoogleDrive_Metadata", "GoogleEarth", "GroupPolicy", "HeidiSQL", "HexChat", "HitmanPro", "IISConfiguration", "IISLogFiles", "IRCClients", "IceChat", "InternetExplorer", "IrfanView", "JDownloader2", "JavaWebCache", "Kali", "Kaseya", "Keepass", "KeepassXC", "LNKFilesAndJumpLists", "LinuxOnWindowsProfileFiles", "LiveUserFiles", "LogFiles", "LogMeIn", "MOF", "MSSQLErrorLog", "MacriumReflect", "Malwarebytes", "ManageEngineLogs", "Mattermost", "McAfee", "McAfee_ePO", "MediaMonkey", "MemoryFiles", "MessagingClients", "MicrosoftOfficeBackstage", "MicrosoftOneNote", "MicrosoftStickyNotes", "MicrosoftTeams", "MicrosoftToDo", "MidnightCommander", "MiniTimelineCollection", "MultiCommander", "NETCLRUsageLogs", "NGINXLogs", "NZBGet", "Nessus", "NewsbinPro", "Newsleecher", "Nicotine__", "Notepad__", "OfficeAutosave", "OfficeDiagnostics", "OfficeDocumentCache", "OneCommander", "OneDrive_Metadata", "OneDrive_UserFiles", "OpenSSHClient", "OpenSSHServer", "OpenVPNClient", "Opera", "OutlookPSTOST", "P2PClients", "PeaZip", "PowerShell7Config", "PowerShellConsole", "PowerShellTranscripts", "Prefetch", "ProtonVPN", "PuffinSecureBrowser", "PushNotification", "Q_Dir", "QFinderPro__QNAP_", "RDPCache", "RDPLogs", "Radmin", "RecentFileCache", "RecycleBin", "RecycleBin_DataFiles", "RecycleBin_InfoFiles", "RegistryHives", "RegistryHivesOther", "RegistryHivesSystem", "RegistryHivesUser", "RemoteAdmin", "RemoteUtilities_app", "RoamingProfile", "RogueKiller", "RustDesk", "SABnbzd", "SDB", "SOFELK", "SQLiteDatabases", "SRUM", "SUM", "SUPERAntiSpyware", "SUSELinuxEnterpriseServer", "ScheduledTasks", "ScreenConnect", "SecureAge", "SentinelOne", "ServerTriage", "ShareX", "Shareaza", "SiemensTIA", "Signal", "SignatureCatalog", "Skype", "Slack", "Snagit", "SnipAndSketch", "Sophos", "Soulseek", "SpeedCommander", "Splashtop", "StartupFolders", "StartupInfo", "Steam", "SublimeText", "SugarSync", "SumatraPDF", "SupremoRemoteDesktop", "Symantec_AV_Logs", "Syscache", "TablacusExplorer", "TeamViewerLogs", "Telegram", "TeraCopy", "ThumbCache", "Thunderbird", "TorrentClients", "Torrents", "TotalAV", "TotalCommander", "TreeSize", "TrendMicro", "USBDetective", "USBDevicesLogs", "Ubuntu", "Ultraviewer", "Usenet", "UsenetClients", "VIPRE", "VLC_Media_Player", "VMware", "VMwareInventory", "VMwareMemory", "VNCLogs", "Viber", "VirtualBox", "VirtualBoxConfig", "VirtualBoxLogs", "VirtualBoxMemory", "VirtualDisks", "WBEM", "WER", "WSL", "WebBrowsers", "WebServers", "Webroot", "WhatsApp", "WinDefendDetectionHist", "WinSCP", "WindowsDefender", "WindowsFirewall", "WindowsHello", "WindowsIndexSearch", "WindowsNetwork", "WindowsNotificationsDB", "WindowsOSUpgradeArtifacts", "WindowsPowerDiagnostics", "WindowsServerDNSAndDHCP", "WindowsSubsystemforAndroid", "WindowsTelemetryDiagnosticsLegacy", "WindowsTimeline", "WindowsYourPhone", "XPRestorePoints", "XYplorer", "ZohoAssist", "Zoom", "iTunesBackup", "mIRC", "mRemoteNG", "openSUSE", "pCloudDatabase", "qBittorrent", "uTorrent")
-foreach ($item in $items) {
-    $checkBox = New-Object System.Windows.Controls.CheckBox
-    $checkBox.Content = $item
-    $checkBox.Add_Click({ CheckBox_StateChanged }) # Add event handler
-	$null = $CheckBoxListBox.Items.Add($checkBox)
+$script:hasInitializedSystemArtifactsTargets = $false
+$script:SystemArtifactTargetItems = @("_BasicCollection", "_KapeTriage", "_SANS_Triage", "_Boot", "_J", "_LogFile", "_MFT", "_MFTMirr", "_SDS", "_T", "1Password", "4KVideoDownloader", "AVG", "AceText", "AcronisTrueImage", "ActiveDirectoryNTDS", "ActiveDirectorySysvol", "AgentRansack", "Amcache", "Ammyy", "Antivirus", "AnyDesk", "ApacheAccessLog", "AppCompatPCA", "AppData", "AppXPackages", "ApplicationEvents", "AsperaConnect", "AssetAdvisorLog", "AteraAgent", "Avast", "AviraAVLogs", "BCD", "BITS", "BitTorrent", "Bitdefender", "BoxDrive_Metadata", "BoxDrive_UserFiles", "BraveBrowser", "BrowserCache", "CertUtil", "Chrome", "ChromeExtensions", "ChromeFileSystem", "CiscoJabber", "ClipboardMaster", "CloudStorage_All", "CloudStorage_Metadata", "CloudStorage_OneDriveExplorer", "CombinedLogs", "Combofix", "ConfluenceLogs", "Cybereason", "Cylance", "DC__", "DWAgent", "Debian", "DirectoryOpus", "DirectoryTraversal_AudioFiles", "DirectoryTraversal_ExcelDocuments", "DirectoryTraversal_PDFDocuments", "DirectoryTraversal_PictureFiles", "DirectoryTraversal_SQLiteDatabases", "DirectoryTraversal_VideoFiles", "DirectoryTraversal_WildCardExample", "DirectoryTraversal_WordDocuments", "Discord", "DoubleCommander", "Drivers", "Dropbox_Metadata", "Dropbox_UserFiles", "EFCommander", "ESET", "Edge", "EdgeChromium", "Emsisoft", "EncapsulationLogging", "EventLogs_RDP", "EventLogs", "EventTraceLogs", "EventTranscriptDB", "Evernote", "Everything__VoidTools_", "EvidenceOfExecution", "Exchange", "ExchangeClientAccess", "ExchangeCve_2021_26855", "ExchangeTransport", "FSecure", "FTPClients", "Fences", "FileExplorerReplacements", "FileSystem", "FileZillaClient", "FileZillaServer", "Firefox", "FreeCommander", "FreeDownloadManager", "FreeFileSync", "Freenet", "FrostWire", "Gigatribe", "GoogleDriveBackupSync_UserFiles", "GoogleDrive_Metadata", "GoogleEarth", "GroupPolicy", "HeidiSQL", "HexChat", "HitmanPro", "IISConfiguration", "IISLogFiles", "IRCClients", "IceChat", "InternetExplorer", "IrfanView", "JDownloader2", "JavaWebCache", "Kali", "Kaseya", "Keepass", "KeepassXC", "LNKFilesAndJumpLists", "LinuxOnWindowsProfileFiles", "LiveUserFiles", "LogFiles", "LogMeIn", "MOF", "MSSQLErrorLog", "MacriumReflect", "Malwarebytes", "ManageEngineLogs", "Mattermost", "McAfee", "McAfee_ePO", "MediaMonkey", "MemoryFiles", "MessagingClients", "MicrosoftOfficeBackstage", "MicrosoftOneNote", "MicrosoftStickyNotes", "MicrosoftTeams", "MicrosoftToDo", "MidnightCommander", "MiniTimelineCollection", "MultiCommander", "NETCLRUsageLogs", "NGINXLogs", "NZBGet", "Nessus", "NewsbinPro", "Newsleecher", "Nicotine__", "Notepad__", "OfficeAutosave", "OfficeDiagnostics", "OfficeDocumentCache", "OneCommander", "OneDrive_Metadata", "OneDrive_UserFiles", "OpenSSHClient", "OpenSSHServer", "OpenVPNClient", "Opera", "OutlookPSTOST", "P2PClients", "PeaZip", "PowerShell7Config", "PowerShellConsole", "PowerShellTranscripts", "Prefetch", "ProtonVPN", "PuffinSecureBrowser", "PushNotification", "Q_Dir", "QFinderPro__QNAP_", "RDPCache", "RDPLogs", "Radmin", "RecentFileCache", "RecycleBin", "RecycleBin_DataFiles", "RecycleBin_InfoFiles", "RegistryHives", "RegistryHivesOther", "RegistryHivesSystem", "RegistryHivesUser", "RemoteAdmin", "RemoteUtilities_app", "RoamingProfile", "RogueKiller", "RustDesk", "SABnbzd", "SDB", "SOFELK", "SQLiteDatabases", "SRUM", "SUM", "SUPERAntiSpyware", "SUSELinuxEnterpriseServer", "ScheduledTasks", "ScreenConnect", "SecureAge", "SentinelOne", "ServerTriage", "ShareX", "Shareaza", "SiemensTIA", "Signal", "SignatureCatalog", "Skype", "Slack", "Snagit", "SnipAndSketch", "Sophos", "Soulseek", "SpeedCommander", "Splashtop", "StartupFolders", "StartupInfo", "Steam", "SublimeText", "SugarSync", "SumatraPDF", "SupremoRemoteDesktop", "Symantec_AV_Logs", "Syscache", "TablacusExplorer", "TeamViewerLogs", "Telegram", "TeraCopy", "ThumbCache", "Thunderbird", "TorrentClients", "Torrents", "TotalAV", "TotalCommander", "TreeSize", "TrendMicro", "USBDetective", "USBDevicesLogs", "Ubuntu", "Ultraviewer", "Usenet", "UsenetClients", "VIPRE", "VLC_Media_Player", "VMware", "VMwareInventory", "VMwareMemory", "VNCLogs", "Viber", "VirtualBox", "VirtualBoxConfig", "VirtualBoxLogs", "VirtualBoxMemory", "VirtualDisks", "WBEM", "WER", "WSL", "WebBrowsers", "WebServers", "Webroot", "WhatsApp", "WinDefendDetectionHist", "WinSCP", "WindowsDefender", "WindowsFirewall", "WindowsHello", "WindowsIndexSearch", "WindowsNetwork", "WindowsNotificationsDB", "WindowsOSUpgradeArtifacts", "WindowsPowerDiagnostics", "WindowsServerDNSAndDHCP", "WindowsSubsystemforAndroid", "WindowsTelemetryDiagnosticsLegacy", "WindowsTimeline", "WindowsYourPhone", "XPRestorePoints", "XYplorer", "ZohoAssist", "Zoom", "iTunesBackup", "mIRC", "mRemoteNG", "openSUSE", "pCloudDatabase", "qBittorrent", "uTorrent")
 
-    # Set default selection
-    if ($item -eq "_SANS_Triage") {
-        $checkBox.IsChecked = $true
+function Initialize-SystemArtifactsTargetList {
+    if ($script:hasInitializedSystemArtifactsTargets) {
+        return
     }
+    if (-not $CheckBoxListBox) {
+        return
+    }
+
+    $CheckBoxListBox.Items.Clear()
+    foreach ($item in $script:SystemArtifactTargetItems) {
+        $checkBox = New-Object System.Windows.Controls.CheckBox
+        $checkBox.Content = $item
+        $checkBox.Add_Click({ CheckBox_StateChanged })
+        $null = $CheckBoxListBox.Items.Add($checkBox)
+
+        if ($item -eq "_SANS_Triage") {
+            $checkBox.IsChecked = $true
+        }
+    }
+
+    $script:hasInitializedSystemArtifactsTargets = $true
+    Update-Parameters
 }
-Update-Parameters
 ####END System Artifacts Collection event handlers####
 
 #####Disk Imaging event handlers####
@@ -12766,8 +12823,10 @@ $ToolsSelectionComboBox = $window.FindName("ToolsSelectionComboBox")
 $ToolDescriptionTextBox = $window.FindName("ToolDescriptionTextBox")
 $ToolDownloadStatusTextBlock = $window.FindName("ToolDownloadStatusTextBlock")
 
-# Define a hashtable for tool descriptions
-$toolDescriptions = @{
+# Define tool descriptions lazily to reduce startup cost.
+$script:toolDescriptions = $null
+$script:toolDescriptionsFactory = {
+    return @{
     "7zip" = @"
 7-Zip is a file archiver with a high compression ratio.
 
@@ -12858,6 +12917,13 @@ Zircolite is a standalone tool written in Python 3. It allows to use SIGMA rules
 
 https://github.com/wagga40/Zircolite
 "@
+    }
+}
+
+function Ensure-ToolDescriptionsLoaded {
+    if (-not $script:toolDescriptions) {
+        $script:toolDescriptions = & $script:toolDescriptionsFactory
+    }
 }
 
 # Add SelectionChanged event handler for ToolsSelectionComboBox
@@ -12871,8 +12937,9 @@ $ToolsSelectionComboBox.Add_SelectionChanged({
     }
 
     # Update the ToolDescriptionTextBox based on the selected item
-    if ($selectedItem -and $toolDescriptions.ContainsKey($selectedItem)) {
-        $ToolDescriptionTextBox.Text = $toolDescriptions[$selectedItem]
+    Ensure-ToolDescriptionsLoaded
+    if ($selectedItem -and $script:toolDescriptions.ContainsKey($selectedItem)) {
+        $ToolDescriptionTextBox.Text = $script:toolDescriptions[$selectedItem]
     } else {
         $ToolDescriptionTextBox.Clear()
     }
@@ -12880,24 +12947,7 @@ $ToolsSelectionComboBox.Add_SelectionChanged({
     Update-DownloadToolButtonState
 })
 
-# Add Tool to CSV right after GUI setup
-Add-ToolToCsv -toolName "7za.exe"
-Add-ToolToCsv -toolName "bulk_extractor64.exe"
-Add-ToolToCsv -toolName "chainsaw*.exe"
-Add-ToolToCsv -toolName "clamdscan.exe"
-Add-ToolToCsv -toolName "etl2pcapng.exe"
-Add-ToolToCsv -toolName "ftkimager.exe"
-Add-ToolToCsv -toolName "GeoLite2-City.mmdb"
-Add-ToolToCsv -toolName "GeoLite2-ASN.mmdb"
-Add-ToolToCsv -toolName "GeoLite2-Country.mmdb"
-Add-ToolToCsv -toolName "Get-ZimmermanTools.ps1"
-Add-ToolToCsv -toolName "hayabusa*.exe"
-Add-ToolToCsv -toolName "log2timeline.py"
-Add-ToolToCsv -toolName "loki.exe"
-Add-ToolToCsv -toolName "Velociraptor*.exe"
-Add-ToolToCsv -toolName "vol.py"
-Add-ToolToCsv -toolName "winpmem*.exe"
-Add-ToolToCsv -toolName "zircolite*.exe"
+# Tool inventory sync is deferred to the Tool Management tab first focus.
 ####End of tools tab event handlers####
 
 ####Evidence Sync event handlers####
@@ -13571,15 +13621,18 @@ $ElasticSearchComboBox.Add_SelectionChanged({
 })
 
 $ElasticCheckBoxListBox.Add_SelectionChanged({
+    Ensure-ElasticLookupDataLoaded
     $selectedItem = $ElasticCheckBoxListBox.SelectedItem
-    if ($selectedItem -and $itemDescriptions.ContainsKey($selectedItem)) {
-        $ElasticSearchDescriptionTextBox.Text = $itemDescriptions[$selectedItem]
+    if ($selectedItem -and $script:itemDescriptions.ContainsKey($selectedItem)) {
+        $ElasticSearchDescriptionTextBox.Text = $script:itemDescriptions[$selectedItem]
     } else {
         $ElasticSearchDescriptionTextBox.Text = ""
     }
 })
 
-$itemDescriptions = @{
+$script:itemDescriptions = $null
+$script:itemDescriptionsFactory = {
+    return @{
     "Amcache" = @"
 This search filters on events related to Windows Amcache artifacts.
 
@@ -13912,8 +13965,12 @@ Event ID 5012: Scanning for viruses is disabled
 Event ID 5013: Tamper protection blocked a change to Microsoft Defender Antivirus.
 "@
     # ... Add more mappings for other items ...
+    }
 }
-$queryMapping = @{
+
+$script:queryMapping = $null
+$script:queryMappingFactory = {
+    return @{
     "Amcache" = @{
         "Query" = "((FullPath:* and FileKeyLastWriteTimestamp:*) or (Binary:* and LastModified:*) or (EntryKey:* and KeyMTime:*))"
         "Columns" = @("'@timestamp'", "FileKeyLastWriteTimestamp", "LastModified", "KeyMTime", "Hostname", "Binary", "FullPath", "EntryKey", "EntryPath", "SHA1")
@@ -13994,6 +14051,16 @@ $queryMapping = @{
         "Query" = "((Artifact:Windows.EventLogs.Evtx or collectionName:Windows.EventLogs.Evtx or OSPath:*.evtx or SourceFile:*.evtx) and Channel:*Defender* and (EventID:(1000 or 1006 or 1007 or 1008 or 1009 or 1011 or 1012 or 1013 or 1015 or 1116 or 1117 or 1118 or 1119 or 1120 or 3002 or 3007 or 5000 or 5001 or 5004 or 5007 or 5008 or 5010 or 5011 or 5012 or 5013) or EventId:(1000 or 1006 or 1007 or 1008 or 1009 or 1011 or 1012 or 1013 or 1015 or 1116 or 1117 or 1118 or 1119 or 1120 or 3002 or 3007 or 5000 or 5001 or 5004 or 5007 or 5008 or 5010 or 5011 or 5012 or 5013)))"
         "Columns" = @("TimeCreated", "EventTime", "Computer", "EventId", "EventID", "UserName", "Username", "MapDescription", "Message", "PayloadData1", "PayloadData2", "PayloadData3", "PayloadData4", "PayloadData5", "ExecutableInfo")  
     }		
+    }
+}
+
+function Ensure-ElasticLookupDataLoaded {
+    if (-not $script:itemDescriptions) {
+        $script:itemDescriptions = & $script:itemDescriptionsFactory
+    }
+    if (-not $script:queryMapping) {
+        $script:queryMapping = & $script:queryMappingFactory
+    }
 }
 
 ####End Elastic Search event handlers####

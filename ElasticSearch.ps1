@@ -16,6 +16,10 @@ function OnTabElasticSearch_GotFocus {
 }
 
 function ElasticSearchButton_Click {
+    if (Get-Command -Name Ensure-ElasticLookupDataLoaded -ErrorAction SilentlyContinue) {
+        Ensure-ElasticLookupDataLoaded
+    }
+
     $baseKibanaUrl = $ElasticURLPathTextBox.Text.Trim().TrimEnd('/')
     # Ensure the URL starts with http:// or https://
     if (-not $baseKibanaUrl.StartsWith("http://") -and -not $baseKibanaUrl.StartsWith("https://")) {
@@ -32,7 +36,7 @@ function ElasticSearchButton_Click {
 
 	$selectedQueryKey = $selectedItem.ToString()
 	
-	$selectedItemDetails = $queryMapping[$selectedQueryKey]
+	$selectedItemDetails = $script:queryMapping[$selectedQueryKey]
 	if ($selectedItemDetails -eq $null) {
 		[System.Windows.MessageBox]::Show("Selected query not found in query mapping.")
 		return

@@ -1,4 +1,5 @@
 $global:hasRunOnTabPageTools = $false
+$script:hasSyncedToolsInventory = $false
 
 #Timer for downloading tools
 $Global:tooldownloadJobs = @()
@@ -357,6 +358,10 @@ function Check-tooldownloadJobStatus {
 
 function OnTabTabPageTools_GotFocus {
     if ($global:hasRunOnTabPageTools) {
+        if (-not $script:hasSyncedToolsInventory) {
+            Sync-ToolsInventoryCsv
+            $script:hasSyncedToolsInventory = $true
+        }
         Update-SelectedToolDownloadStatus
         Update-DownloadToolButtonState
         return
@@ -366,9 +371,39 @@ function OnTabTabPageTools_GotFocus {
         New-Item -ItemType Directory -Path $toolsDirectory | Out-Null
         Update-Log "Subdirectory 'Tools' created successfully." "tabPageToolsTextBox"
     }
-		$global:hasRunOnTabPageTools = $true
+	$global:hasRunOnTabPageTools = $true
+    if (-not $script:hasSyncedToolsInventory) {
+        Sync-ToolsInventoryCsv
+        $script:hasSyncedToolsInventory = $true
+    }
     Update-SelectedToolDownloadStatus
     Update-DownloadToolButtonState
+}
+
+function Sync-ToolsInventoryCsv {
+    $toolPatterns = @(
+        "7za.exe",
+        "bulk_extractor64.exe",
+        "chainsaw*.exe",
+        "clamdscan.exe",
+        "etl2pcapng.exe",
+        "ftkimager.exe",
+        "GeoLite2-City.mmdb",
+        "GeoLite2-ASN.mmdb",
+        "GeoLite2-Country.mmdb",
+        "Get-ZimmermanTools.ps1",
+        "hayabusa*.exe",
+        "log2timeline.py",
+        "loki.exe",
+        "Velociraptor*.exe",
+        "vol.py",
+        "winpmem*.exe",
+        "zircolite*.exe"
+    )
+
+    foreach ($pattern in $toolPatterns) {
+        Add-ToolToCsv -toolName $pattern
+    }
 }
 
 function Add-ToolToCsv {
