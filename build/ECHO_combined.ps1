@@ -269,6 +269,10 @@ $plasoProcessingTimer.Add_Tick({
 
 #Timer for zimmermanProcessingTimer initialization
 $Global:zimmermanJobs = @()
+$Global:zimmermanPendingJobs = @()
+$Global:zimmermanMaxParallel = 4
+$Global:zimmermanRequestCounter = 0
+$Global:zimmermanRequestTracker = @{}
 $zimmermanProcessingTimer = New-Object System.Windows.Forms.Timer
 $zimmermanProcessingTimer.Interval = 2000 # 2 seconds
 $zimmermanProcessingTimer.Add_Tick({
@@ -572,20 +576,47 @@ function Process-BulkExtractor {
 }
 
 function Check-chainsawJobStatus {	
-    $completedCount = 0
+    $remainingJobs = @()
     foreach ($job in $Global:chainsawjobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Chainsaw completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Chainsaw completed: $($job.JobName) for $($job.ArtifactPath)"
-				$job.DataAdded = $true		
-            }
-			$completedCount++
+        $updatedJob = Get-Job -Id $job.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $updatedJob) {
+            continue
         }
-	}
-    if ($completedCount -eq $Global:chainsawjobs.Count) {
+
+        $jobOutput = @(Receive-Job -Id $updatedJob.Id -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
+        foreach ($line in $jobOutput) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                Update-Log $line "ProcessSystemTextBox"
+            }
+        }
+
+        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed" -or $updatedJob.State -eq "Stopped") {
+            if (-not $job.DataAdded) {
+                if ($updatedJob.State -eq "Completed") {
+                    Update-Log "Chainsaw completed: $($job.JobName) (output: $($job.OutputPath))" "ProcessSystemTextBox"
+                } else {
+                    $failureReason = $null
+                    if ($updatedJob.ChildJobs -and $updatedJob.ChildJobs.Count -gt 0) {
+                        $failureReason = $updatedJob.ChildJobs[0].JobStateInfo.Reason
+                    }
+                    if ($failureReason) {
+                        Update-Log "Chainsaw failed: $($job.JobName) - $failureReason" "ProcessSystemTextBox"
+                    } else {
+                        Update-Log "Chainsaw failed: $($job.JobName)" "ProcessSystemTextBox"
+                    }
+                }
+                $job.DataAdded = $true
+            }
+
+            Remove-Job -Id $updatedJob.Id -Force -ErrorAction SilentlyContinue
+            continue
+        }
+
+        $remainingJobs += $job
+    }
+
+    $Global:chainsawjobs = $remainingJobs
+    if ($Global:chainsawjobs.Count -eq 0) {
         Update-Log "All Chainsaw processing completed." "ProcessSystemTextBox"
         $chainsawJobTimer.Stop()
     }
@@ -619,6 +650,14 @@ function Process-Chainsaw {
     )
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 	$chainsawDirectory = [System.IO.Path]::GetDirectoryName($ChainsawPath)
+    if (-not (Test-Path -LiteralPath $InputPath -ErrorAction SilentlyContinue)) {
+        Update-Log "Chainsaw input path does not exist: $InputPath" "ProcessSystemTextBox"
+        return
+    }
+    if (-not (Test-Path -LiteralPath $ChainsawPath -PathType Leaf -ErrorAction SilentlyContinue)) {
+        Update-Log "Chainsaw executable path does not exist: $ChainsawPath" "ProcessSystemTextBox"
+        return
+    }
 	# Determine artifactName based on whether InputPath is a root directory or a specific file/folder
 	if (([System.IO.Path]::GetPathRoot($InputPath)).TrimEnd('\') -eq $InputPath.TrimEnd('\')) {
 		# InputPath is a root directory, so use a modified naming convention
@@ -633,31 +672,63 @@ function Process-Chainsaw {
         $null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
     }
 	$outputPath = Join-Path $outputBaseFolder "${timestamp}_$artifactName"
-	$artifactFileNameWithJson = "${artifactName}.json"
-	$jsonoutputPath = Join-Path $outputBaseFolder "${timestamp}_$artifactFileNameWithJson"
+    if (-not (Test-Path -LiteralPath $outputPath)) {
+        $null = New-Item -Path $outputPath -ItemType Directory -Force
+    }
+	$jsonoutputPath = Join-Path $outputPath "${artifactName}.json"
 	
-    $chainsawArguments = @("hunt", "`'$InputPath`'", "-s", "`'$($ChainsawParentFolder)\sigma`'", "--mapping", "`'$($ChainsawParentFolder)\mappings\sigma-event-logs-all.yml`'", "-r", "`'$($ChainsawParentFolder)\rules`'", "-o")
+    $sigmaPath = Join-Path $ChainsawParentFolder "sigma"
+    $mappingPath = Join-Path $ChainsawParentFolder "mappings\sigma-event-logs-all.yml"
+    $rulesPath = Join-Path $ChainsawParentFolder "rules"
+    $chainsawArguments = @("hunt", $InputPath, "-s", $sigmaPath, "--mapping", $mappingPath, "-r", $rulesPath, "--skip-errors", "-o")
 	
 		
     if ($useJsonOutput) {
-        $chainsawArguments += ("`'$jsonoutputPath`'", "--json")
+        $chainsawArguments += @($jsonoutputPath, "--json")
     } else {
-		$chainsawArguments += ("`'$outputPath`'", "--csv")
+		$chainsawArguments += @($outputPath, "--csv")
 	}
 	
-    $chainsawCommand = "& `"$ChainsawPath`" $chainsawArguments"
-    Update-Log "chainsawCommand is $chainsawCommand" "ProcessSystemTextBox"
+    $chainsawCommandPreview = "& `"$ChainsawPath`" " + (($chainsawArguments | ForEach-Object { "`"$_`"" }) -join " ")
+    Update-Log "chainsawCommand is $chainsawCommandPreview" "ProcessSystemTextBox"
     $job = Start-Job -ScriptBlock {
-        param($chainsawCommand, $chainsawDirectory)
-        Set-Location -Path $chainsawDirectory 
-        Invoke-Expression $chainsawCommand
-        
-    } -ArgumentList ($chainsawCommand, $chainsawDirectory)
+        param($chainsawPath, $chainsawArguments, $chainsawDirectory, $outputPath, $useJsonOutput)
+        try {
+            Write-Output ("Starting Chainsaw job in {0}" -f $chainsawDirectory)
+            Set-Location -Path $chainsawDirectory
+
+            $runStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+            $stdoutPath = Join-Path $outputPath "${runStamp}_chainsaw_stdout.txt"
+            $stderrPath = Join-Path $outputPath "${runStamp}_chainsaw_stderr.txt"
+
+            $proc = Start-Process -FilePath $chainsawPath -ArgumentList $chainsawArguments -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+            if ($proc.ExitCode -ne 0) {
+                $stderrText = ""
+                if (Test-Path -LiteralPath $stderrPath) {
+                    $stderrText = (Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue).Trim()
+                }
+                throw ("Chainsaw exited with code {0}. {1}" -f $proc.ExitCode, $stderrText)
+            }
+
+            $producedArtifacts = Get-ChildItem -Path $outputPath -File -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -notlike "*_chainsaw_stdout.txt" -and $_.Name -notlike "*_chainsaw_stderr.txt"
+            }
+            if (-not $producedArtifacts -or $producedArtifacts.Count -eq 0) {
+                Write-Output "Chainsaw finished with no result artifacts produced. Verify input contains supported logs."
+            } else {
+                Write-Output ("Chainsaw produced {0} artifact file(s) in {1}" -f $producedArtifacts.Count, $outputPath)
+            }
+        } catch {
+            Write-Output ("Chainsaw execution failed: {0}" -f $_.Exception.Message)
+            throw
+        }
+    } -ArgumentList ($ChainsawPath, $chainsawArguments, $chainsawDirectory, $outputPath, $useJsonOutput)
 
     $Global:chainsawjobs += [PSCustomObject]@{
         JobObject = $job
         JobName = "chainsaw_$timestamp"
         ArtifactPath = $InputPath
+        OutputPath = $outputPath
         DataAdded = $false
     }
 
@@ -1461,104 +1532,418 @@ with geoip2.database.Reader(dbPath) as reader:
 
 }
 
-function Check-ZimmermanProcessingStatus {	
-    # Initialize the completed job count
-    $completedCount = 0
-	
+function Get-ZimmermanActiveModuleSummary {
+    $running = @()
     foreach ($job in $Global:zimmermanJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Finished Zimmerman Tool: $($job.JobName) at outputpath $($job.OutputPath)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Finished Zimmerman Tool: $($job.JobName) at outputpath $($job.OutputPath)"
-				$job.DataAdded = $true		
-            }
-			$completedCount++
+        $updatedJob = Get-Job -Id $job.JobObject.Id -ErrorAction SilentlyContinue
+        if ($updatedJob -and ($updatedJob.State -eq "Running" -or $updatedJob.State -eq "NotStarted")) {
+            $running += $job.ModuleName
         }
-	}
-	
-    if ($completedCount -eq $Global:zimmermanJobs.Count) {
+    }
+
+    $queued = @()
+    foreach ($pending in $Global:zimmermanPendingJobs) {
+        if ($pending -and $pending.ModuleName) {
+            $queued += $pending.ModuleName
+        }
+    }
+
+    $running = @($running | Select-Object -Unique)
+    $queued = @($queued | Select-Object -Unique)
+
+    $runningText = if ($running.Count -gt 0) { $running -join ", " } else { "none" }
+    $queuedText = if ($queued.Count -gt 0) { $queued -join ", " } else { "none" }
+    return ("Zimmerman status: running [{0}] | queued [{1}]" -f $runningText, $queuedText)
+}
+
+function Start-NextZimmermanJobs {
+    if (-not $Global:zimmermanPendingJobs) {
+        return
+    }
+
+    $runningCount = 0
+    foreach ($existingJob in $Global:zimmermanJobs) {
+        $updatedJob = Get-Job -Id $existingJob.JobObject.Id -ErrorAction SilentlyContinue
+        if ($updatedJob -and ($updatedJob.State -eq "Running" -or $updatedJob.State -eq "NotStarted")) {
+            $runningCount++
+        }
+    }
+
+    while ($runningCount -lt $Global:zimmermanMaxParallel -and $Global:zimmermanPendingJobs.Count -gt 0) {
+        $next = $Global:zimmermanPendingJobs[0]
+        if ($Global:zimmermanPendingJobs.Count -gt 1) {
+            $Global:zimmermanPendingJobs = @($Global:zimmermanPendingJobs[1..($Global:zimmermanPendingJobs.Count - 1)])
+        } else {
+            $Global:zimmermanPendingJobs = @()
+        }
+
+        $job = Start-Job -ScriptBlock {
+            param($moduleName, $moduleFilePath, $moduleArguments, $outputFolderPath)
+            try {
+                Write-Output ("Starting Zimmerman module: {0}" -f $moduleName)
+
+                if (-not (Test-Path -LiteralPath $moduleFilePath -ErrorAction SilentlyContinue)) {
+                    throw "Executable not found: $moduleFilePath"
+                }
+
+                $debugPath = Join-Path $outputFolderPath "debug.txt"
+                $outputFile = Join-Path $outputFolderPath "ztools_output.txt"
+                $command = "& `"$moduleFilePath`" $moduleArguments"
+                Add-Content -Path $debugPath -Value ("Executing command: {0}" -f $command)
+
+                $output = Invoke-Expression $command 2>&1 | Out-String
+                if (-not [string]::IsNullOrWhiteSpace($output)) {
+                    Add-Content -Path $outputFile -Value ("`r`n--- {0} ---`r`n{1}" -f $moduleName, $output)
+                }
+
+                Write-Output ("Finished Zimmerman module: {0}. OutputPath: {1}" -f $moduleName, $outputFolderPath)
+            } catch {
+                Write-Output ("Failed Zimmerman module: {0}. Error: {1}" -f $moduleName, $_.Exception.Message)
+                throw
+            }
+        } -ArgumentList $next.ModuleName, $next.FilePath, $next.Arguments, $next.OutputPath
+
+        $Global:zimmermanJobs += [PSCustomObject]@{
+            JobObject = $job
+            RequestId = $next.RequestId
+            JobName = $next.JobName
+            ModuleName = $next.ModuleName
+            OutputPath = $next.OutputPath
+            DataAdded = $false
+            HasDetailedCompletionOutput = $false
+            HasDetailedFailureOutput = $false
+        }
+
+        $runningCount++
+    }
+}
+
+function Check-ZimmermanProcessingStatus {
+    $remainingJobs = @()
+    $logQueueStatus = $false
+
+    foreach ($job in $Global:zimmermanJobs) {
+        $updatedJob = Get-Job -Id $job.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $updatedJob) {
+            continue
+        }
+
+        $jobOutput = @(Receive-Job -Id $updatedJob.Id -ErrorAction SilentlyContinue | ForEach-Object { [string]$_ })
+        foreach ($line in $jobOutput) {
+            if (-not [string]::IsNullOrWhiteSpace($line)) {
+                if ($line -like "Finished Zimmerman module:*") {
+                    $job.HasDetailedCompletionOutput = $true
+                } elseif ($line -like "Failed Zimmerman module:*") {
+                    $job.HasDetailedFailureOutput = $true
+                }
+                Update-Log $line "ProcessSystemTextBox"
+            }
+        }
+
+        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed" -or $updatedJob.State -eq "Stopped") {
+            if (-not $job.DataAdded) {
+                if ($updatedJob.State -eq "Completed") {
+                    if (-not $job.HasDetailedCompletionOutput) {
+                        Update-Log "Finished Zimmerman module: $($job.ModuleName)" "ProcessSystemTextBox"
+                    }
+                } else {
+                    if (-not $job.HasDetailedFailureOutput) {
+                        $failureReason = $null
+                        if ($updatedJob.ChildJobs -and $updatedJob.ChildJobs.Count -gt 0) {
+                            $failureReason = $updatedJob.ChildJobs[0].JobStateInfo.Reason
+                        }
+                        if ($failureReason) {
+                            Update-Log "Zimmerman module failed: $($job.ModuleName) - $failureReason" "ProcessSystemTextBox"
+                        } else {
+                            Update-Log "Zimmerman module failed: $($job.ModuleName)" "ProcessSystemTextBox"
+                        }
+                    }
+                }
+
+                if ($job.RequestId -and $Global:zimmermanRequestTracker.ContainsKey($job.RequestId)) {
+                    $requestRecord = $Global:zimmermanRequestTracker[$job.RequestId]
+                    if ($updatedJob.State -eq "Completed") {
+                        $requestRecord.Completed = [int]$requestRecord.Completed + 1
+                    } else {
+                        $requestRecord.Failed = [int]$requestRecord.Failed + 1
+                    }
+
+                    $finishedCount = [int]$requestRecord.Completed + [int]$requestRecord.Failed
+                    if (-not $requestRecord.Logged -and $finishedCount -ge [int]$requestRecord.Total) {
+                        Update-Log ("Zimmerman request #{0} completed: {1}/{2} succeeded, {3} failed [{4}]" -f $requestRecord.Id, $requestRecord.Completed, $requestRecord.Total, $requestRecord.Failed, $requestRecord.Label) "ProcessSystemTextBox"
+                        $requestRecord.Logged = $true
+                    }
+                    $Global:zimmermanRequestTracker[$job.RequestId] = $requestRecord
+                }
+
+                $job.DataAdded = $true
+            }
+
+            $logQueueStatus = $true
+            Remove-Job -Id $updatedJob.Id -Force -ErrorAction SilentlyContinue
+            continue
+        }
+
+        $remainingJobs += $job
+    }
+
+    $Global:zimmermanJobs = $remainingJobs
+    Start-NextZimmermanJobs
+
+    if ($logQueueStatus) {
+        Update-Log (Get-ZimmermanActiveModuleSummary) "ProcessSystemTextBox"
+    }
+
+    if ($Global:zimmermanJobs.Count -eq 0 -and $Global:zimmermanPendingJobs.Count -eq 0) {
         Update-Log "All Zimmerman Tools processing completed." "ProcessSystemTextBox"
+        $Global:zimmermanRequestTracker = @{}
         $zimmermanProcessingTimer.Stop()
     }
 }
 
 function ProcessZimmermanButton_Click {
-    if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZimmermanPathTextBox.Text) {
-        [System.Windows.MessageBox]::Show("Please select an artifact path and Zimmerman Tools main directory or Get-ZimmermanTools.ps1.")
-        return
-    }
-
-    # Use dotnet CLI to check for installed runtimes
-    $validDotNetVersionInstalled = $false
     try {
-        $dotnetOutput = & dotnet --list-runtimes 2>$null
-        foreach ($line in $dotnetOutput) {
-            if ($line -match '^Microsoft\.NETCore\.App\s+(\d+)\.') {
-                $majorVersion = [int]$matches[1]
-                if ($majorVersion -ge 9) {
-                    $validDotNetVersionInstalled = $true
-                    break
+        if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZimmermanPathTextBox.Text) {
+            [System.Windows.MessageBox]::Show("Please select an artifact path and Zimmerman Tools main directory or Get-ZimmermanTools.ps1.")
+            return
+        }
+
+        $artifactPathValue = $ArtifactProcessingPathTextBox.Text.Trim().Trim('"')
+        $zimmermanPathValue = $ZimmermanPathTextBox.Text.Trim().Trim('"')
+        if (-not (Test-Path -LiteralPath $artifactPathValue -ErrorAction SilentlyContinue)) {
+            [System.Windows.MessageBox]::Show("Selected artifact path does not exist.")
+            return
+        }
+        if (-not (Test-Path -LiteralPath $zimmermanPathValue -ErrorAction SilentlyContinue)) {
+            [System.Windows.MessageBox]::Show("Selected Zimmerman path does not exist.")
+            return
+        }
+
+        # Use dotnet CLI to check for installed runtimes
+        $validDotNetVersionInstalled = $false
+        try {
+            $dotnetOutput = & dotnet --list-runtimes 2>$null
+            foreach ($line in $dotnetOutput) {
+                if ($line -match '^Microsoft\.NETCore\.App\s+(\d+)\.') {
+                    $majorVersion = [int]$matches[1]
+                    if ($majorVersion -ge 9) {
+                        $validDotNetVersionInstalled = $true
+                        break
+                    }
                 }
             }
+        } catch {
+            Update-Log "Could not detect .NET runtimes. Please ensure .NET is installed and 'dotnet' is on your PATH." "ProcessSystemTextBox"
+            return
+        }
+
+        # Logic based on whether a valid version is installed
+        if ($validDotNetVersionInstalled) {
+            Update-Log "Starting Zimmerman Tools..." "ProcessSystemTextBox"
+            $selectedModule = $null
+            if ($ZtoolsComboBox.SelectedItem -is [string]) {
+                $selectedModule = [string]$ZtoolsComboBox.SelectedItem
+            } elseif ($ZtoolsComboBox.SelectedItem -and $ZtoolsComboBox.SelectedItem.Content) {
+                $selectedModule = [string]$ZtoolsComboBox.SelectedItem.Content
+            }
+            if ([string]::IsNullOrWhiteSpace($selectedModule)) {
+                $selectedModule = "All Modules"
+            }
+
+            Process-ZimmermanTools -SelectedModule $selectedModule -ArtifactPath $artifactPathValue -ZimmermanFilePath $zimmermanPathValue
+
+            # Start the timer
+            if (-not $zimmermanProcessingTimer.Enabled) {
+                $zimmermanProcessingTimer.Start()
+            }
+        } else {
+            Update-Log "Zimmerman Tools used in this program require .NET version 9 or greater. Please install the required .NET version." "ProcessSystemTextBox"
+            return
         }
     } catch {
-        Update-Log "Could not detect .NET runtimes. Please ensure .NET is installed and 'dotnet' is on your PATH." "ProcessSystemTextBox"
-        return
-    }
-
-    # Logic based on whether a valid version is installed
-    if ($validDotNetVersionInstalled) {
-        Update-Log "Starting Zimmerman Tools..." "ProcessSystemTextBox"
-        $selectedModule = $ZtoolsComboBox.SelectedItem
-        $ArtifactPath = $ArtifactProcessingPathTextBox.Text.Trim().Trim('"')
-        $ZimmermanFilePath = $ZimmermanPathTextBox.Text.Trim().Trim('"')
-        Process-ZimmermanTools -SelectedModule $selectedModule -ArtifactPath $ArtifactPath -ZimmermanFilePath $ZimmermanFilePath
-
-        # Start the timer
-        if (-not $zimmermanProcessingTimer.Enabled) {
-            $zimmermanProcessingTimer.Start()
-        }
-    } else {
-        Update-Log "Zimmerman Tools used in this program require .NET version 9 or greater. Please install the required .NET version." "ProcessSystemTextBox"
-        return
+        $errorMessage = $_.Exception.Message
+        Update-Log "Zimmerman Tools launch failed: $errorMessage" "ProcessSystemTextBox"
+        [System.Windows.MessageBox]::Show("Zimmerman Tools launch failed. Check Process System Artifacts log for details.")
     }
 }
 
+function Get-ZimmermanModuleMap {
+    param(
+        [string]$ArtifactPath,
+        [string]$ZimmermanToolsPath,
+        [string]$OutputFolderPath,
+        [bool]$IsFile,
+        [bool]$IsDirectory,
+        [string]$ArtifactFullPath
+    )
+
+    $modules = @{
+        'JLECmd' = @{
+            FilePath = "$ZimmermanToolsPath\JLECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\FileFolderAccess`' -q --mp"
+        }
+        'LECmd' = @{
+            FilePath = "$ZimmermanToolsPath\LECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\FileFolderAccess`' -q --mp"
+        }
+        'PECmd' = @{
+            FilePath = "$ZimmermanToolsPath\PECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\ProgramExecution`' --mp -q"
+        }
+        'RBCmd' = @{
+            FilePath = "$ZimmermanToolsPath\RBCmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\RecycleBin`' -q"
+        }
+        'RECmd' = @{
+            FilePath = "$ZimmermanToolsPath\RECmd\RECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --bn `'$ZimmermanToolsPath\RECmd\BatchExamples\Kroll_Batch.reb`' --csv `'$OutputFolderPath\Registry`' --nl --recover"
+        }
+        'SBECmd' = @{
+            FilePath = "$ZimmermanToolsPath\SBECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\FileFolderAccess`' --nl"
+        }
+        'SQLECmd' = @{
+            FilePath = "$ZimmermanToolsPath\SQLECmd\SQLECmd.exe"
+            Arguments = "-d `'$ArtifactPath`' --csv `'$OutputFolderPath\SQLDatabases`'"
+        }
+    }
+
+    $amcacheFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter 'Amcache.hve' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $recentFileCacheFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter 'RecentFileCache.bcf' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $systemHive = Get-ChildItem -Path $ArtifactPath -Include "SYSTEM" -Recurse -File | Where-Object { $_.FullName -like "*\Windows\System32\config\SYSTEM" } | Select-Object -First 1
+    if (-not $systemHive) {
+        $systemHive = Get-ChildItem -Path $ArtifactPath -Include "SYSTEM" -Recurse -File | Select-Object -First 1
+    }
+    $softwareHive = Get-ChildItem -Path $ArtifactPath -Include "SOFTWARE" -Recurse -File | Where-Object { $_.FullName -like "*\Windows\System32\config\SOFTWARE" } | Select-Object -First 1
+    if (-not $softwareHive) {
+        $softwareHive = Get-ChildItem -Path $ArtifactPath -Include "SOFTWARE" -Recurse -File | Select-Object -First 1
+    }
+
+    $eventLogFolderPath = $null
+    $eventLogFilePath = $null
+    $evtxecmdArguments = $null
+    if ($IsDirectory) {
+        $eventLogFolder = Get-ChildItem -Path $ArtifactPath -Recurse -Directory | Where-Object { $_.FullName -like "*\Windows\System32\winevt\Logs" } | Select-Object -First 1
+        if ($eventLogFolder) {
+            $eventLogFolderPath = $eventLogFolder.FullName
+        } else {
+            $eventLogFolderPath = $ArtifactPath
+        }
+        $evtxecmdArguments = "-d `'$eventLogFolderPath`' --csv `'$OutputFolderPath\EventLogs`'"
+    } elseif ($IsFile) {
+        $eventLogFilePath = $ArtifactFullPath
+        $evtxecmdArguments = "-f `'$eventLogFilePath`' --csv `'$OutputFolderPath\EventLogs`'"
+    }
+
+    $MFTFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter '$MFT' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $JFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter '*$J' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $sumFolder = Get-ChildItem -Path $ArtifactPath -Recurse -Directory | Where-Object { $_.FullName -like "*\Windows\System32\LogFiles\SUM" } | Select-Object -First 1
+    $sumFolderPath = $null
+    if ($sumFolder) {
+        $sumFolderPath = $sumFolder.FullName
+    } else {
+        $currentMdbFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter "Current.mdb" | Select-Object -First 1
+        if ($currentMdbFile) {
+            $sumFolderPath = $currentMdbFile.DirectoryName
+        }
+    }
+    $ActivitiesCacheFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter 'ActivitiesCache.db' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $srudbFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter 'SRUDB.dat' -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if ($amcacheFile) {
+        $modules['AmcacheParser'] = @{
+            FilePath = "$ZimmermanToolsPath\AmcacheParser.exe"
+            Arguments = "-f `'$($amcacheFile.FullName)`' --csv `'$OutputFolderPath\ProgramExecution`' -i --mp --nl"
+        }
+    }
+    if ($systemHive) {
+        $modules['AppCompatCacheParser'] = @{
+            FilePath = "$ZimmermanToolsPath\AppCompatCacheParser.exe"
+            Arguments = "-f `'$($systemHive.FullName)`' --csv `'$OutputFolderPath\ProgramExecution`' --nl"
+        }
+    }
+    if ($eventLogFolderPath -or $eventLogFilePath) {
+        $modules['EvtxECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\EvtxECmd\EvtxECmd.exe"
+            Arguments = $evtxecmdArguments
+        }
+    }
+    if ($sumFolderPath) {
+        $modules['SumECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\SumECmd.exe"
+            Arguments = "-d `'$sumFolderPath`' --csv `'$OutputFolderPath\SUMDatabase`'"
+        }
+    }
+    if ($MFTFile -and $JFile) {
+        $modules['MFTECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\MFTECmd.exe"
+            Arguments = "-f `'$($JFile.FullName)`' -m `'$($MFTFile.FullName)`' --csv `'$OutputFolderPath\FileSystem`'"
+        }
+    } elseif ($MFTFile) {
+        $modules['MFTECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\MFTECmd.exe"
+            Arguments = "-f `'$($MFTFile.FullName)`' --csv `'$OutputFolderPath\FileSystem`'"
+        }
+    }
+    if ($recentFileCacheFile) {
+        $modules['RecentFileCacheParser'] = @{
+            FilePath = "$ZimmermanToolsPath\RecentFileCacheParser.exe"
+            Arguments = "-f `'$($recentFileCacheFile.FullName)`' --csv `'$OutputFolderPath\ProgramExecution`'"
+        }
+    }
+    if ($ActivitiesCacheFile) {
+        $modules['WxTCmd'] = @{
+            FilePath = "$ZimmermanToolsPath\WxTCmd.exe"
+            Arguments = "-f `'$($ActivitiesCacheFile.FullName)`' --csv `'$OutputFolderPath\FileFolderAccess`'"
+        }
+    }
+    if ($srudbFile -and $softwareHive) {
+        $modules['SrumECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\SrumECmd.exe"
+            Arguments = "-f `'$($srudbFile.FullName)`' -r `'$($softwareHive.FullName)`' --csv `'$OutputFolderPath\SRUMDatabase`'"
+        }
+    } elseif ($srudbFile) {
+        $modules['SrumECmd'] = @{
+            FilePath = "$ZimmermanToolsPath\SrumECmd.exe"
+            Arguments = "-f `'$($srudbFile.FullName)`' --csv `'$OutputFolderPath\SRUMDatabase`'"
+        }
+    }
+
+    return $modules
+}
+
 function Process-ZimmermanTools {
-	param (
+    param (
         [string]$SelectedModule,
-		[string]$ArtifactPath,
+        [string]$ArtifactPath,
         [string]$ZimmermanFilePath
     )
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $uniqueJobName = "ZimmermanJob_${timestamp}"	
 
-    # Determine if the ArtifactPath is a file or a directory
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $uniqueJobName = "ZimmermanJob_${timestamp}"
+
     $isFile = $false
     $isDirectory = $false
+    $ArtifactfullPath = $null
     if (Test-Path -Path $ArtifactPath -PathType Leaf) {
         $isFile = $true
-		$ArtifactfullPath = $ArtifactPath
+        $ArtifactfullPath = $ArtifactPath
     } elseif (Test-Path -Path $ArtifactPath -PathType Container) {
         $isDirectory = $true
+    } else {
+        Update-Log "Artifact path is not a valid file or directory for Zimmerman processing." "ProcessSystemTextBox"
+        return
     }
-	
-	# Check if ArtifactPath is a file, and if so, get the directory
-	if (Test-Path -Path $ArtifactPath -PathType Leaf) {
-		$ArtifactPath = [System.IO.Path]::GetDirectoryName($ArtifactPath)
-	}
-	
-	
-    # Get the name of the folder or file from the ArtifactPath (without extension)
-	# Check if ArtifactPath is a root path
-	if (([System.IO.Path]::GetPathRoot($ArtifactPath)).TrimEnd('\') -eq $ArtifactPath.TrimEnd('\')) {
-		# It's a root path, handle accordingly
-		$outputFolderName = "Root_" + $ArtifactPath.Trim(':\\') + "_Drive"
-	} else {
-		$outputFolderName = [IO.Path]::GetFileNameWithoutExtension($ArtifactPath)
-	}
+
+    if ($isFile) {
+        $ArtifactPath = [System.IO.Path]::GetDirectoryName($ArtifactPath)
+    }
+
+    if (([System.IO.Path]::GetPathRoot($ArtifactPath)).TrimEnd('\') -eq $ArtifactPath.TrimEnd('\')) {
+        $outputFolderName = "Root_" + $ArtifactPath.Trim(':\\') + "_Drive"
+    } else {
+        $outputFolderName = [IO.Path]::GetFileNameWithoutExtension($ArtifactPath)
+    }
 
     $outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zimmermantools'
     $outputFolderPath = Join-Path $outputBaseFolder $outputFolderName
@@ -1566,236 +1951,75 @@ function Process-ZimmermanTools {
         $null = New-Item -Path $outputFolderPath -ItemType Directory -Force
     }
 
-	# Modify ZimmermanToolsPath to point to the directory containing the executables
-	$ZimmermanToolsPath = (Get-Item $ZimmermanFilePath).Directory.FullName
-	$net9Path = Join-Path -Path $ZimmermanToolsPath -ChildPath "net9"
+    $zimmermanItem = Get-Item -LiteralPath $ZimmermanFilePath -ErrorAction Stop
+    $ZimmermanToolsPath = if ($zimmermanItem.PSIsContainer) { $zimmermanItem.FullName } else { Split-Path -Path $zimmermanItem.FullName -Parent }
+    $net9Path = Join-Path -Path $ZimmermanToolsPath -ChildPath "net9"
     if (-not (Test-Path -Path $net9Path)) {
-        # Update the GUI with a message and return from the function
         Update-Log "This program requires the .NET 9 version of Zimmerman Tools located in a 'net9' directory within $ZimmermanToolsPath." "ProcessSystemTextBox"
         return
-    } else {
-        $ZimmermanToolsPath = $net9Path
     }
-	Update-Log "Zimmerman Tool: $($ZimmermanToolsPath) SelectedModule: $($SelectedModule) ArtifactPath: $($ArtifactPath) ArtifactfullPath: $($ArtifactfullPath)  outputFolderPath: $($outputFolderPath)" "ProcessSystemTextBox"
-    # Start processing job
-    $job = Start-Job -ScriptBlock {
-        param($SelectedModule, $ArtifactPath, $ZimmermanToolsPath, $outputFolderPath, $isFile, $isDirectory, $ArtifactfullPath)
+    $ZimmermanToolsPath = $net9Path
 
-		# Debugging: Write initial parameters to a file
-		$debugOutput = "Zimmerman Tool: $ZimmermanToolsPath SelectedModule: $SelectedModule ArtifactPath: $ArtifactPath outputFolderPath: $outputFolderPath isFile: $isFile isDirectory: $isDirectory"
-		Add-Content -Path "$outputFolderPath\debug.txt" -Value $debugOutput
-	
-		# Add logic to locate specific files
-		$amcacheFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter 'Amcache.hve' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$amcacheFilePath = $amcacheFile.FullName
-		$recentFileCacheFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter 'RecentFileCache.bcf' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$recentFileCacheFolder = $recentFileCacheFile.FullName		
-		$systemHive = Get-ChildItem -Path $ArtifactPath -Include "SYSTEM" -Recurse -File | 
-					Where-Object { $_.FullName -like "*\Windows\System32\config\SYSTEM" } | 
-					Select-Object -First 1
-		if (-not $systemHive) {
-			$systemHive = Get-ChildItem -Path $ArtifactPath -Include "SYSTEM" -Recurse -File | 
-						Select-Object -First 1
-		}
-		$systemHivePath = $null
-		if ($systemHive) {
-			$systemHivePath = $systemHive.FullName
-		}	
-		
-		if ($isDirectory) {
-			$eventLogFolder = Get-ChildItem -Path $ArtifactPath -Recurse -Directory | 
-							Where-Object { $_.FullName -like "*\Windows\System32\winevt\Logs" } | 
-							Select-Object -First 1	
-			if ($eventLogFolder) {
-				$eventLogFolderPath = $eventLogFolder.FullName
-				$evtxecmdArguments = "-d `'$eventLogFolderPath`' --csv `'$outputFolderPath\EventLogs`'"
-			} else {
-				$eventLogFolderPath = $ArtifactPath
-				$evtxecmdArguments = "-d `'$eventLogFolderPath`' --csv `'$outputFolderPath\EventLogs`'"
-			}		 
-		} elseif ($isFile) {
-			$eventLogFilePath = $ArtifactfullPath
-			$evtxecmdArguments = "-f `'$eventLogFilePath`' --csv `'$outputFolderPath\EventLogs`'"
-		}
-		$MFTFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter '$MFT' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$MFTFileFolderPath = $MFTFile.Fullname
-		$JFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter '*$J' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$JFileFolderPath = $Jfile.FullName
-		$sumFolder = Get-ChildItem -Path $ArtifactPath -Recurse -Directory | 
-					Where-Object { $_.FullName -like "*\Windows\System32\LogFiles\SUM" } | 
-					Select-Object -First 1		
-		$sumFolderPath = $null	
-		if ($sumFolder) {
-			$sumFolderPath = $sumFolder.FullName
-		} else {
-			$currentMdbFile = Get-ChildItem -Path $ArtifactPath -Recurse -Filter "Current.mdb" | 
-							Select-Object -First 1
-			if ($currentMdbFile) {
-				$sumFolderPath = $currentMdbFile.DirectoryName
-			}
-		}	
-		$ActivitiesCacheFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter 'ActivitiesCache.db' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$ActivitiesCacheFilePath = $ActivitiesCacheFile.FullName
-		$srudbFile = Get-ChildItem -Path $ArtifactPath  -Recurse -Filter 'SRUDB.dat' -ErrorAction SilentlyContinue | Select-Object -First 1
-		$srudbFilePath = $srudbFile.Fullname
-		$softwareHive = Get-ChildItem -Path $ArtifactPath -Include "SOFTWARE" -Recurse -File | 
-						Where-Object { $_.FullName -like "*\Windows\System32\config\SOFTWARE" } | 
-						Select-Object -First 1
-		if (-not $softwareHive) {
-			$softwareHive = Get-ChildItem -Path $ArtifactPath -Include "SOFTWARE" -Recurse -File | 
-							Select-Object -First 1
-		}
-		$softwareHivePath = $null
-		if ($softwareHive) {
-			$softwareHivePath = $softwareHive.FullName
-		}
-		# Process artifacts using specified modules  
-		$modules = @{
-			'JLECmd' = @{
-				FilePath = "$ZimmermanToolsPath\JLECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\FileFolderAccess`' -q --mp"
-			}
-			'LECmd' = @{
-				FilePath = "$ZimmermanToolsPath\LECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\FileFolderAccess`' -q --mp"
-			}
-			'PECmd' = @{
-				FilePath = "$ZimmermanToolsPath\PECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\ProgramExecution`' --mp -q"
-			}
-			'RBCmd' = @{
-				FilePath = "$ZimmermanToolsPath\RBCmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\RecycleBin`' -q"
-			}
-			'RECmd' = @{
-				FilePath = "$ZimmermanToolsPath\RECmd\RECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --bn `'$ZimmermanToolsPath\RECmd\BatchExamples\Kroll_Batch.reb`' --csv `'$outputFolderPath\Registry`' --nl --recover"
-			}
-			'SBECmd' = @{
-				FilePath = "$ZimmermanToolsPath\SBECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\FileFolderAccess`' --nl"
-			}
-			'SQLECmd' = @{
-				FilePath = "$ZimmermanToolsPath\SQLECmd\SQLECmd.exe"
-				Arguments = "-d `'$ArtifactPath`' --csv `'$outputFolderPath\SQLDatabases`'"
-			}
-			
-		}
-		
-	
-		if ($amcacheFilePath) {
-			$modules['AmcacheParser'] = @{
-				FilePath = "$ZimmermanToolsPath\AmcacheParser.exe"
-				Arguments = "-f `'$amcacheFilePath`' --csv `'$outputFolderPath\ProgramExecution`' -i --mp --nl"
-			}
-		}
-		
-		if ($systemHivePath) {
-			$modules['AppCompatCacheParser'] = @{
-				FilePath =  "$ZimmermanToolsPath\AppCompatCacheParser.exe"
-				Arguments = "-f `'$systemHivePath`' --csv `'$outputFolderPath\ProgramExecution`' --nl"
-			}
-		}
-		
-		if ($eventLogFolderPath -or $eventLogFilePath) {
-            $modules['EvtxECmd'] = @{
-                FilePath =  "$ZimmermanToolsPath\EvtxECmd\EvtxECmd.exe"
-                Arguments = $evtxecmdArguments
+    Update-Log "Zimmerman Tool: $($ZimmermanToolsPath) SelectedModule: $($SelectedModule) ArtifactPath: $($ArtifactPath) ArtifactfullPath: $($ArtifactfullPath) outputFolderPath: $($outputFolderPath)" "ProcessSystemTextBox"
+
+    $modules = Get-ZimmermanModuleMap -ArtifactPath $ArtifactPath -ZimmermanToolsPath $ZimmermanToolsPath -OutputFolderPath $outputFolderPath -IsFile:$isFile -IsDirectory:$isDirectory -ArtifactFullPath $ArtifactfullPath
+
+    $modulesToQueue = @()
+    if ($SelectedModule -eq 'All Modules') {
+        foreach ($entry in $modules.GetEnumerator()) {
+            if ($entry.Key -and $entry.Value -and $entry.Value.FilePath) {
+                $modulesToQueue += [PSCustomObject]@{
+                    ModuleName = $entry.Key
+                    FilePath = $entry.Value.FilePath
+                    Arguments = $entry.Value.Arguments
+                }
             }
         }
-		
-		if ($sumFolderPath) {
-			$modules['SumECmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\SumECmd.exe"
-				Arguments = "-d `'$sumFolderPath`' --csv `'$outputFolderPath\SUMDatabase`'"
-			}
-		}
-		
-		if ($MFTFileFolderPath -and $JFileFolderPath) {
-			$modules['MFTECmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\MFTECmd.exe"
-				Arguments = "-f `'$JFileFolderPath`' -m `'$MFTFileFolderPath`' --csv `'$outputFolderPath\FileSystem`'"
-			}
-		} elseif ($MFTFileFolderPath -and -not $JFileFolderPath) {
-			$modules['MFTECmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\MFTECmd.exe"
-				Arguments = "-f `'$MFTFileFolderPath`' --csv `'$outputFolderPath\FileSystem`'"
-			}
-		}
-		
-		if ($recentFileCacheFolder) {
-			$modules['RecentFileCacheParser'] = @{
-				FilePath =  "$ZimmermanToolsPath\RecentFileCacheParser.exe"
-				Arguments = "-f `'$recentFileCacheFolder`' --csv `'$outputFolderPath\ProgramExecution`'"
-			}
-		}
-		
-		if ($ActivitiesCacheFilePath) {
-			$modules['WxTCmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\WxTCmd.exe"
-				Arguments = "-f `'$ActivitiesCacheFilePath`' --csv `'$outputFolderPath\FileFolderAccess`'"
-			}
-		}
-		
-		if ($srudbFilePath -and $softwareHivePath) {
-			$modules['SrumECmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\SrumECmd.exe"
-				Arguments = "-f `'$srudbFilePath`' -r `'$softwareHivePath`' --csv `'$outputFolderPath\SRUMDatabase`'"
-			}
-		} elseif ($srudbFilePath -and -not $softwareHivePath) {
-			$modules['SrumECmd'] = @{
-				FilePath =  "$ZimmermanToolsPath\SrumECmd.exe"
-				Arguments = "-f `'$srudbFilePath`' --csv `'$outputFolderPath\SRUMDatabase`'"
-			}
-		}
-	
-		#Determine the modules to process based on the selection
-		$modulesToProcess = @{}
-		if ($SelectedModule -eq 'All Modules') {
-			$modulesToProcess = $modules.GetEnumerator() | Where-Object { $_.Key }
-		} elseif ($modules.ContainsKey($SelectedModule)) {
-			$modulesToProcess[$SelectedModule] = $modules[$SelectedModule]
-		} else {
-			Write-Host "Selected module ($SelectedModule) is not recognized."
-			return
-		}
-
-		$outputFile = Join-Path $outputFolderPath "ztools_output.txt"
-
-		foreach ($module in $modulesToProcess.GetEnumerator()) {
-			$moduleFilePath = $module.Value.FilePath
-			$moduleArguments = $module.Value.Arguments
-		
-			try {
-				# Construct the command
-				$command = "& `'$moduleFilePath`' $moduleArguments"
-				
-				# Log the command to debug file for troubleshooting
-				Add-Content -Path "$outputFolderPath\debug.txt" -Value "Executing command: $command"
-			
-				# Run the command and capture output and error
-				$output = Invoke-Expression $command 2>&1 | Out-String
-			
-				# Append output to the files
-				Add-Content -Path $outputFile -Value $output
-				# Errors are included in $output due to 2>&1 redirection
-			} catch {
-				# Log error in debug.txt
-				Add-Content -Path "$outputFolderPath\debug.txt" -Value "Error with module: $moduleFilePath"
-				Add-Content -Path "$outputFolderPath\debug.txt" -Value $_.Exception.Message
-			}
-		}
-
-		
-	} -ArgumentList $SelectedModule, $ArtifactPath, $ZimmermanToolsPath, $outputFolderPath, $isFile, $isDirectory, $ArtifactfullPath
-
-    # Add job details to global job list
-    $Global:zimmermanJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = $uniqueJobName
-        OutputPath = $outputFolderPath
-        DataAdded = $false
+    } elseif ($modules.ContainsKey($SelectedModule)) {
+        $moduleData = $modules[$SelectedModule]
+        $modulesToQueue += [PSCustomObject]@{
+            ModuleName = $SelectedModule
+            FilePath = $moduleData.FilePath
+            Arguments = $moduleData.Arguments
+        }
+    } else {
+        Update-Log "Selected module ($SelectedModule) is not recognized for this artifact set." "ProcessSystemTextBox"
+        return
     }
+
+    $modulesToQueue = @($modulesToQueue | Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace($_.ModuleName) -and (Test-Path -LiteralPath $_.FilePath -ErrorAction SilentlyContinue) })
+    if ($modulesToQueue.Count -eq 0) {
+        Update-Log "No runnable Zimmerman modules were identified for this path." "ProcessSystemTextBox"
+        return
+    }
+
+    $requestId = [int]$Global:zimmermanRequestCounter + 1
+    $Global:zimmermanRequestCounter = $requestId
+    $requestLabel = "{0} | {1}" -f (Split-Path $ArtifactPath -Leaf), $SelectedModule
+    $Global:zimmermanRequestTracker[$requestId] = [PSCustomObject]@{
+        Id = $requestId
+        Label = $requestLabel
+        Total = $modulesToQueue.Count
+        Completed = 0
+        Failed = 0
+        Logged = $false
+    }
+
+    foreach ($module in $modulesToQueue) {
+        $Global:zimmermanPendingJobs += [PSCustomObject]@{
+            RequestId = $requestId
+            JobName = $uniqueJobName
+            ModuleName = $module.ModuleName
+            FilePath = $module.FilePath
+            Arguments = $module.Arguments
+            OutputPath = $outputFolderPath
+        }
+    }
+
+    Update-Log ("Queued Zimmerman request #{0}: {1} module(s) [{2}]" -f $requestId, $modulesToQueue.Count, $requestLabel) "ProcessSystemTextBox"
+    Update-Log ("Zimmerman parallel workers: {0}" -f $Global:zimmermanMaxParallel) "ProcessSystemTextBox"
+    Start-NextZimmermanJobs
+    Update-Log (Get-ZimmermanActiveModuleSummary) "ProcessSystemTextBox"
 }
 
 function Check-ZimmermanToolsStatus {	
