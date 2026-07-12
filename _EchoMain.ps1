@@ -1160,62 +1160,64 @@ function Update-Log {
 		<!-- M365 Collection Tab -->
 		<TabItem Header="Collect M365 Logs" IsEnabled="False" x:Name="TabCollectM365">
 			<Grid>
-				<Button x:Name="ConnectClientButton" Content="Connect to Client" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Margin="10,10,0,0"/>
-				<Button x:Name="TestClientConnectionButton" Content="Test Connection" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Margin="140,10,0,0"/>
-				<TextBlock x:Name="M365CustomIPsTextBox" Text="In the Custom IPs or Users files lists, please enter each full IP address or username on a separate line." HorizontalAlignment="Left" VerticalAlignment="Top" Margin="300,10,0,0" Width="500" TextWrapping="Wrap"/>
-				<Button x:Name="OpenCustomIPListButton" Content="Open IP List" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Margin="450,50,0,0"/>
-				<Button x:Name="OpenCustomUserListButton" Content="Open User List" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Margin="580,50,0,0"/>	
-				<TextBlock Text="Collect Triage attempts to collect all collections below except for MAL and Message Trace using their default arguments" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,75,0,0" TextWrapping="Wrap" Width="740"/>							
-				<Button x:Name="CollectTriageButton" Content="Collect Triage" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,50,0,0" Width="150" IsEnabled="False"/>				
-				<TextBlock x:Name="M365CollectionName" Text="M365 Collection Type" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,105,0,0" TextWrapping="Wrap" Width="740"/>
-				<TextBlock x:Name="M365ExtraArguments" Text="Extra Arguments (If any)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,105,0,0" TextWrapping="Wrap" Width="740"/>
-				<Button x:Name="CollectUALButton" Content="Unified Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,125,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectUALUsersComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,125,0,0" Width="105">
+				<Button x:Name="ConnectClientButton" Content="Connect Exchange" HorizontalAlignment="Left" VerticalAlignment="Top" Width="125" Margin="10,10,0,0"/>
+				<Button x:Name="ConnectGraphButton" Content="Connect Graph" HorizontalAlignment="Left" VerticalAlignment="Top" Width="110" Margin="145,10,0,0" IsEnabled="False"/>
+				<Button x:Name="TestClientConnectionButton" Content="Test Connection" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Margin="260,10,0,0"/>
+				<Button x:Name="OpenM365SecurityInfoButton" Content="Open Security Info" HorizontalAlignment="Left" VerticalAlignment="Top" Width="130" Margin="390,10,0,0"/>
+				<TextBlock x:Name="M365CustomIPsTextBox" Text="Exchange-backed collections work after Connect Exchange. Graph-backed collections prompt separately only when needed." HorizontalAlignment="Left" VerticalAlignment="Top" Margin="560,8,0,0" Width="240" TextWrapping="Wrap"/>
+				<Button x:Name="OpenCustomIPListButton" Content="Open IP List" HorizontalAlignment="Left" VerticalAlignment="Top" Width="110" Margin="560,58,0,0"/>
+				<Button x:Name="OpenCustomUserListButton" Content="Open User List" HorizontalAlignment="Left" VerticalAlignment="Top" Width="110" Margin="685,58,0,0"/>	
+				<Button x:Name="CollectTriageButton" Content="Collect Triage" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,58,0,0" Width="150" IsEnabled="False"/>				
+				<TextBlock Text="Collect Triage uses Exchange-backed collections by default and only adds Graph-backed collections if Graph is already connected. Custom IPs or Users files should contain one full IP address or username per line." HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,58,0,0" TextWrapping="Wrap" Width="370"/>							
+				<TextBlock x:Name="M365CollectionName" Text="M365 Collection Type" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,125,0,0" TextWrapping="Wrap" Width="740"/>
+				<TextBlock x:Name="M365ExtraArguments" Text="Extra Arguments (If any)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,125,0,0" TextWrapping="Wrap" Width="740"/>
+				<Button x:Name="CollectUALButton" Content="Unified Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,145,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectUALUsersComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,145,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>	
-				<ComboBox x:Name="CollectUALIPsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="280,125,0,0" Width="105">
+				<ComboBox x:Name="CollectUALIPsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="280,145,0,0" Width="105">
 					<ComboBoxItem Content="All IPs" />
 					<ComboBoxItem Content="Custom IPs" />
 				</ComboBox>
-				<ComboBox x:Name="CollectUALOperationsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="390,125,0,0" Width="130">
+				<ComboBox x:Name="CollectUALOperationsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="390,145,0,0" Width="130">
 					<ComboBoxItem Content="Limited Operations" />
 					<ComboBoxItem Content="All Operations" />
 				</ComboBox>				
-				<ComboBox x:Name="CollectUALDateComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="525,125,0,0" Width="105">
+				<ComboBox x:Name="CollectUALDateComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="525,145,0,0" Width="105">
 					<ComboBoxItem Content="Past 90 Days" />
 					<ComboBoxItem Content="Custom Date" />
 				</ComboBox>				
-				<DatePicker x:Name="M365StartDatePicker" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="635,125,0,0" Width="120" IsEnabled="False"/>				
-				<Button x:Name="CollectMALButton" Content="Mailbox Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,150,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMALComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,150,0,0" Width="105">
+				<DatePicker x:Name="M365StartDatePicker" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="635,145,0,0" Width="120" IsEnabled="False"/>				
+				<Button x:Name="CollectMALButton" Content="Mailbox Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,170,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectMALComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,170,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>				
-				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,175,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,200,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,200,0,0" Width="105">
+				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,195,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,220,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,220,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>
-				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,225,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,225,0,0" Width="105">
+				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,245,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,245,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>				
-				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,250,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,275,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,275,0,0" Width="105">
+				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,270,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,295,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,295,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,300,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,300,0,0" Width="105">
+				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,320,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,320,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,325,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,325,0,0" Width="105">
+				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,345,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,345,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>						
@@ -2551,8 +2553,11 @@ $TabCollectM365 = $window.FindName("TabCollectM365")
 $TabCollectM365.Add_GotFocus({ OnTabCollectM365_GotFocus })
 $ConnectClientButton = $window.FindName("ConnectClientButton")
 $ConnectClientButton.Add_Click({ ConnectClientButton_Click })
+$ConnectGraphButton = $window.FindName("ConnectGraphButton")
+$ConnectGraphButton.Add_Click({ ConnectGraphButton_Click })
 $TestClientConnectionButton = $window.FindName("TestClientConnectionButton")
 $TestClientConnectionButton.Add_Click({ TestClientConnectionButton_Click })
+$OpenM365SecurityInfoButton = $window.FindName("OpenM365SecurityInfoButton")
 $OpenCustomIPListButton = $window.FindName("OpenCustomIPListButton")
 $OpenCustomUserListButton = $window.FindName("OpenCustomUserListButton")
 $M365StartDatePicker = $window.FindName("M365StartDatePicker")
@@ -2653,6 +2658,9 @@ if ($CollectLastPasswordComboBox -ne $null) {
 }
 $OpenCustomIPListButton.Add_Click({
     Start-Process $global:ipAddressesFilePath
+})
+$OpenM365SecurityInfoButton.Add_Click({
+    Open-M365SecurityInfoButton_Click
 })
 $OpenCustomUserListButton.Add_Click({
     Start-Process $global:usernamesFilePath

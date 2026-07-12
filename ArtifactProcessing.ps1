@@ -2342,6 +2342,9 @@ function ExportTimelineArtifactsButton_Click {
                             $columns += "IOC_Hit"
                         }
                         for ($i = 0; $i -lt $reader.FieldCount; $i++) {
+                            if ($includeIOC -and $reader.GetName($i) -eq "IOC_Hit") {
+                                continue
+                            }
                             $columns += $reader.GetName($i)
                         }
                         $streamWriter.WriteLine(($columns -join ","))
@@ -2353,6 +2356,9 @@ function ExportTimelineArtifactsButton_Click {
                         $row += '"' + $reader["IOC_Hit"].ToString().Replace('"', '""') + '"'
                     }
                     for ($i = 0; $i -lt $reader.FieldCount; $i++) {
+                        if ($includeIOC -and $reader.GetName($i) -eq "IOC_Hit") {
+                            continue
+                        }
                         $row += '"' + $reader.GetValue($i).ToString().Replace('"', '""') + '"'
                     }
                     $streamWriter.WriteLine(($row -join ","))
@@ -2381,10 +2387,31 @@ function ExportTimelineArtifactsButton_Click {
                          -replace "~", "[~]"     # Escape tildes
         }
 
+        function Test-SqliteTableExists {
+            param(
+                [System.Data.SQLite.SQLiteConnection]$Connection,
+                [string]$TableName
+            )
+
+            $tableExistsCommand = $Connection.CreateCommand()
+            $tableExistsCommand.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=@table_name;"
+            [void]$tableExistsCommand.Parameters.Add("@table_name", [System.Data.DbType]::String)
+            $tableExistsCommand.Parameters["@table_name"].Value = $TableName
+            try {
+                $count = [int]$tableExistsCommand.ExecuteScalar()
+                return ($count -gt 0)
+            } finally {
+                $tableExistsCommand.Dispose()
+            }
+        }
+
         try {
             $connectionString = "Data Source=$DatabasePath;Version=3;"
             $sqliteConnection = New-Object -TypeName System.Data.SQLite.SQLiteConnection -ArgumentList $connectionString
             $sqliteConnection.Open()
+            $hasEventsCore = Test-SqliteTableExists -Connection $sqliteConnection -TableName "events_core"
+            $hasArtifacts = Test-SqliteTableExists -Connection $sqliteConnection -TableName "Artifacts"
+            $dateFilterCore = $DateFilter -replace "\[@timestamp\]", "ec.[@timestamp]"
 
             $timestamp = Get-Date -Format "yyyy_MM_dd-HH_mm_ss"
 
@@ -2410,7 +2437,36 @@ function ExportTimelineArtifactsButton_Click {
                 }
 
                 $iocConditionString = $iocConditions -join " OR "
-                $IOCQuery = @"
+                if ($hasEventsCore) {
+                    Write-Log "IOC export using normalized tables (events_core + artifact_type tables)."
+                    $IOCQuery = @"
+SELECT 
+    ec.event_id,
+    ec.[@timestamp],
+    ec.system_name,
+    ec.user_name,
+    ec.event_description,
+    ec.tool,
+    ec.file_name,
+    ec.source_file,
+    ec.file_type,
+    (CASE 
+    $(foreach ($IOC in $IOCs) {
+        $escapedIOC = Escape-SQLString $IOC.ToLower()
+        "WHEN LOWER(ec.event_description) LIKE '%$escapedIOC%' THEN '$escapedIOC'
+         WHEN LOWER(ec.system_name) LIKE '%$escapedIOC%' THEN '$escapedIOC'
+         WHEN LOWER(ec.user_name) LIKE '%$escapedIOC%' THEN '$escapedIOC'"
+    }) ELSE ''
+END) AS IOC_Hit
+FROM events_core ec
+WHERE (
+    $iocConditionString
+) $dateFilterCore
+ORDER BY ec.[@timestamp] DESC
+"@
+                } elseif ($hasArtifacts) {
+                    Write-Log "IOC export using legacy Artifacts table (fallback)."
+                    $IOCQuery = @"
 SELECT *, (CASE 
     $(foreach ($IOC in $IOCs) {
         $escapedIOC = Escape-SQLString $IOC.ToLower()
@@ -2421,6 +2477,9 @@ SELECT *, (CASE
 END) AS IOC_Hit FROM Artifacts WHERE 
 ($iocConditionString) $DateFilter
 "@
+                } else {
+                    throw "No timeline table found. Expected events_core or Artifacts."
+                }
 
                 # Log the IOC terms and the resulting SQL query for debugging
                 Write-Log "Searching for IOCs: $($IOCs -join ', ')"
@@ -2437,7 +2496,29 @@ END) AS IOC_Hit FROM Artifacts WHERE
                 $exportFilePath = Join-Path $ArtifactsTimelineDir "$timestamp-timeline.csv"
                 
                 # Create SQL query to fetch data, sorted by @timestamp in descending order
-                $query = "SELECT * FROM Artifacts WHERE 1=1 $DateFilter ORDER BY [@timestamp] DESC"
+                if ($hasEventsCore) {
+                    Write-Log "Timeline export using normalized tables (events_core + artifact_type tables)."
+                    $query = @"
+SELECT 
+    ec.event_id,
+    ec.[@timestamp],
+    ec.system_name,
+    ec.user_name,
+    ec.event_description,
+    ec.tool,
+    ec.file_name,
+    ec.source_file,
+    ec.file_type
+FROM events_core ec
+WHERE 1=1 $dateFilterCore
+ORDER BY ec.[@timestamp] DESC
+"@
+                } elseif ($hasArtifacts) {
+                    Write-Log "Timeline export using legacy Artifacts table (fallback)."
+                    $query = "SELECT * FROM Artifacts WHERE 1=1 $DateFilter ORDER BY [@timestamp] DESC"
+                } else {
+                    throw "No timeline table found. Expected events_core or Artifacts."
+                }
 
                 # Process data in batches
                 $streamWriter = [System.IO.StreamWriter]::new($exportFilePath)
@@ -2493,6 +2574,22 @@ function ProcessTimelineArtifactsButton_Click {
 	$chainsawPath = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Chainsaw'
 	$hayabusaPath = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Hayabusa'
 	$zircolitePath = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
+	$timelineIngestHelperCandidates = @(
+		(Join-Path $executableDirectory 'Helpers\TimelineIngestHelper.exe'),
+		(Join-Path $executableDirectory 'build\Helpers\TimelineIngestHelper.exe')
+	)
+	if ($PSScriptRoot) {
+		$timelineIngestHelperCandidates += @(
+			(Join-Path $PSScriptRoot 'Helpers\TimelineIngestHelper.exe'),
+			(Join-Path $PSScriptRoot 'build\Helpers\TimelineIngestHelper.exe')
+		)
+	}
+	$timelineIngestHelperPath = $timelineIngestHelperCandidates |
+		Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+		Select-Object -First 1
+	if (-not $timelineIngestHelperPath) {
+		$timelineIngestHelperPath = $timelineIngestHelperCandidates[0]
+	}
 
 
     # Ensure the ArtifactsTimeline directory exists
@@ -2502,6 +2599,88 @@ function ProcessTimelineArtifactsButton_Click {
 
     # Load System.Data.SQLite assembly in the main script
     $assemblyPath = $sqlitePathTextBox.Text.Trim().Trim('"')
+
+	function Ensure-TimelineIngestHelperExecutable {
+		param(
+			[string]$HelperPath,
+			[string]$SQLiteAssemblyPath,
+			[string]$ExecutableDirectory,
+			[switch]$ForceRebuild
+		)
+
+		$helperExists = -not [string]::IsNullOrWhiteSpace($HelperPath) -and (Test-Path -LiteralPath $HelperPath -PathType Leaf)
+
+		$sourceCandidates = @(
+			(Join-Path $ExecutableDirectory 'build\TimelineIngestHelper.cs')
+		)
+		if ($PSScriptRoot) {
+			$sourceCandidates += (Join-Path $PSScriptRoot 'build\TimelineIngestHelper.cs')
+		}
+
+		$helperSourcePath = $sourceCandidates |
+			Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) } |
+			Select-Object -First 1
+
+		if (-not $helperSourcePath) {
+			# If source is unavailable, keep using existing helper if present.
+			return $helperExists
+		}
+
+		if ([string]::IsNullOrWhiteSpace($SQLiteAssemblyPath) -or -not (Test-Path -LiteralPath $SQLiteAssemblyPath -PathType Leaf)) {
+			return $helperExists
+		}
+
+		$shouldBuild = -not $helperExists -or $ForceRebuild
+		if (-not $shouldBuild) {
+			try {
+				$helperWrite = (Get-Item -LiteralPath $HelperPath).LastWriteTimeUtc
+				$sourceWrite = (Get-Item -LiteralPath $helperSourcePath).LastWriteTimeUtc
+				if ($sourceWrite -gt $helperWrite) {
+					$shouldBuild = $true
+				}
+			} catch {
+				$shouldBuild = $true
+			}
+		}
+
+		if (-not $shouldBuild) {
+			return $true
+		}
+
+		try {
+			$helperDirectory = Split-Path -Parent $HelperPath
+			if (-not [string]::IsNullOrWhiteSpace($helperDirectory) -and -not (Test-Path -LiteralPath $helperDirectory -PathType Container)) {
+				New-Item -ItemType Directory -Path $helperDirectory -Force | Out-Null
+			}
+
+			if (Test-Path -LiteralPath $HelperPath -PathType Leaf) {
+				Remove-Item -LiteralPath $HelperPath -Force
+			}
+
+			Add-Type -Path $helperSourcePath `
+				-ReferencedAssemblies @($SQLiteAssemblyPath, "System.Data.dll", "Microsoft.VisualBasic.dll") `
+				-OutputAssembly $HelperPath `
+				-OutputType ConsoleApplication
+
+			return (Test-Path -LiteralPath $HelperPath -PathType Leaf)
+		} catch {
+			return $false
+		}
+	}
+
+	$forceHelperRebuild = $false
+	if ($PSCommandPath -and ([System.IO.Path]::GetExtension($PSCommandPath) -ieq '.ps1')) {
+		# In script-run testing mode, rebuild helper each launch to pick up C# changes immediately.
+		$forceHelperRebuild = $true
+	}
+	$helperBuilt = Ensure-TimelineIngestHelperExecutable `
+		-HelperPath $timelineIngestHelperPath `
+		-SQLiteAssemblyPath $assemblyPath `
+		-ExecutableDirectory $executableDirectory `
+		-ForceRebuild:$forceHelperRebuild
+	if ($helperBuilt -and (Test-Path -LiteralPath $timelineIngestHelperPath -PathType Leaf)) {
+		$timelineIngestHelperPath = (Resolve-Path -LiteralPath $timelineIngestHelperPath).Path
+	}
 
     # Function to convert JSON to Hashtable
     function ConvertTo-Hashtable {
@@ -2518,7 +2697,7 @@ function ProcessTimelineArtifactsButton_Click {
 
     # Start the process as a background job
     $job = Start-Job -ScriptBlock {
-        param($SelectedTools, $DatabasePath, $LogFilePath, $HashLogPath, $ZimmermanToolsPath, $AssemblyPath, $chainsawPath, $hayabusaPath, $zircolitePath)
+        param($SelectedTools, $DatabasePath, $LogFilePath, $HashLogPath, $ZimmermanToolsPath, $AssemblyPath, $chainsawPath, $hayabusaPath, $zircolitePath, $TimelineIngestHelperPath)
 
         # Load the assembly inside the job
         Add-Type -Path $AssemblyPath
@@ -2533,7 +2712,8 @@ function ProcessTimelineArtifactsButton_Click {
                 [string]$ZimmermanToolsPath,
                 [string]$chainsawPath,
                 [string]$hayabusaPath,
-                [string]$zircolitePath				
+                [string]$zircolitePath,
+				[string]$TimelineIngestHelperPath
             )
 
             function Write-Log {
@@ -2609,9 +2789,24 @@ function ProcessTimelineArtifactsButton_Click {
 					[string]$LogFilePath
 				)
 
-				$batchSize = 1000
-				$batch = New-Object System.Collections.ArrayList
+				$batchSize = 5000
 				$lineNumber = 0
+				$rowsInTransaction = 0
+				$rowsRead = 0
+				$rowsSkipped = 0
+				$skipReasons = @{}
+				$parser = $null
+				$coreInsertCommand = $null
+				$typeInsertCommands = @{}
+				$transaction = $null
+				function Add-SkipReason {
+					param([string]$Reason)
+					$rowsSkipped++
+					if (-not $skipReasons.ContainsKey($Reason)) {
+						$skipReasons[$Reason] = 0
+					}
+					$skipReasons[$Reason]++
+				}
 
 				try {
 					if ([string]::IsNullOrWhiteSpace($filePath)) {
@@ -2629,22 +2824,51 @@ function ProcessTimelineArtifactsButton_Click {
 
 					# Read header
 					$headers = $parser.ReadFields()
+					$normalizedColumns = ($columns | ForEach-Object {
+						if ($_ -eq 'Group') {
+							'_group'
+						} else {
+							$_ -replace '[^a-zA-Z0-9_]', '_'
+						}
+					})
+
+					$coreInsertCommand = $sqliteConnection.CreateCommand()
+					$coreInsertCommand.CommandText = @"
+INSERT INTO events_core ('@timestamp', system_name, user_name, event_description, tool, file_name, source_file, file_type)
+VALUES (@p_timestamp, @p_system_name, @p_user_name, @p_event_description, @p_tool, @p_file_name, @p_source_file, @p_file_type);
+SELECT last_insert_rowid();
+"@
+					[void]$coreInsertCommand.Parameters.Add("@p_timestamp", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_system_name", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_user_name", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_event_description", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_tool", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_file_name", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_source_file", [System.Data.DbType]::String)
+					[void]$coreInsertCommand.Parameters.Add("@p_file_type", [System.Data.DbType]::String)
+
+					$file_name = [System.IO.Path]::GetFileName($filePath)
+					$source_file = $filePath
+					$transaction = $sqliteConnection.BeginTransaction()
+					$coreInsertCommand.Transaction = $transaction
 
 					while (-not $parser.EndOfData) {
 						$values = $parser.ReadFields()
 						$row = @{}
+						$rowsRead++
 
 						for ($i = 0; $i -lt $headers.Length; $i++) {
-							$row[$headers[$i]] = $values[$i]
+							if ($i -lt $values.Length) {
+								$row[$headers[$i]] = $values[$i]
+							} else {
+								$row[$headers[$i]] = $null
+							}
 						}
 
 						# Prepare SQL command for the row
 						$timestamp = ""
 						$user_name = ""
 						$event_description = ""
-						$file_name = [System.IO.Path]::GetFileName($filePath)
-						$source_file = $filePath
-
 						if ($tool -eq 'Chainsaw') {
 							$user_name = $row['User']
 							$systemName = $row['Computer']
@@ -2691,6 +2915,7 @@ function ProcessTimelineArtifactsButton_Click {
 
 								if ($dateTime -eq $null) {
 									Write-Log "Failed to parse timestamp: $timestamp"
+									Add-SkipReason -Reason "Chainsaw timestamp parse failure"
 									continue
 								}
 
@@ -2799,6 +3024,7 @@ function ProcessTimelineArtifactsButton_Click {
 
 								if ($dateTime -eq $null) {
 									Write-Log "Failed to parse timestamp: $timestamp"
+									Add-SkipReason -Reason "Hayabusa timestamp parse failure"
 									continue
 								}
 
@@ -2849,6 +3075,7 @@ function ProcessTimelineArtifactsButton_Click {
 
 							if ($dateTime -eq $null) {
 								Write-Log "Failed to parse timestamp: $timestamp"
+								Add-SkipReason -Reason "Zircolite timestamp parse failure"
 								continue
 							}
 
@@ -2857,6 +3084,7 @@ function ProcessTimelineArtifactsButton_Click {
 						} else {
 							# If the format does not match, log an error
 							Write-Log "Invalid SystemTime format: $timestamp"
+							Add-SkipReason -Reason "Zircolite invalid SystemTime format"
 							continue
 						}
 						if ($file_name -like '*Application_zircolite.csv') {	
@@ -2876,6 +3104,7 @@ function ProcessTimelineArtifactsButton_Click {
 							$rule_title = if ($row['rule_title'] -ne '') { Escape-SQLString $row['rule_title'] } else { '<empty_field>' }
 							# Drop the row if rule_title matches "WMI Event Subscription"
 							if ($rule_title -eq 'WMI Event Subscription') {
+								Add-SkipReason -Reason "Zircolite filtered WMI Event Subscription"
 								continue
 							}							
 							$event_description = "$rule_title"
@@ -2910,6 +3139,7 @@ function ProcessTimelineArtifactsButton_Click {
 							$user_name = $row['UserID']	
 							$rule_title = if ($row['rule_title'] -ne '') { Escape-SQLString $row['rule_title'] } else { '<empty_field>' }
 							if ($rule_title -eq 'WMI Event Subscription') {
+								Add-SkipReason -Reason "Zircolite filtered WMI Event Subscription"
 								continue
 							}							
 							$event_description = "$rule_title"
@@ -3425,120 +3655,225 @@ function ProcessTimelineArtifactsButton_Click {
 							$timestamp = Format-Timestamp -timestamp $timestamp
 						}
 
-						function Escape-SQLString {
-							param (
-								[string]$str
-							)
-							return $str -replace "'", "''" -replace '"', '""' -replace "`n", " " -replace "`r", " " -replace "`t", " " -replace "[^\x20-\x7E]", '' # Escaping single quotes, double quotes, newlines, tabs, and removing non-printable characters
-						}
+						$coreInsertCommand.Parameters["@p_timestamp"].Value = if ($timestamp) { $timestamp } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_system_name"].Value = if ($systemName) { $systemName } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_user_name"].Value = if ($user_name) { $user_name } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_event_description"].Value = if ($event_description) { $event_description } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_tool"].Value = if ($tool) { $tool } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_file_name"].Value = if ($file_name) { $file_name } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_source_file"].Value = if ($source_file) { $source_file } else { [DBNull]::Value }
+						$coreInsertCommand.Parameters["@p_file_type"].Value = if ($fileType) { $fileType } else { [DBNull]::Value }
+						$eventId = [int64]$coreInsertCommand.ExecuteScalar()
 
-						# Build the SQL command for the current row
-						$columnsData = @()
-						foreach ($column in $columns) {
-							$value = $row[$column]
-							if ($value -eq $null -or $value -eq '') {
-								$columnsData += "NULL"
-							} else {
-								$value = Escape-SQLString -str $value
-								$columnsData += "'$value'"
-							}
-						}
-
-						# Adjust column names
-						$columnsString = ($columns | ForEach-Object { 
-							if ($_ -eq 'Group') { 
-								'_group' 
-							} else { 
-								$_ -replace '[^a-zA-Z0-9_]', '_' 
-							}
-						}) -join ", "						
-
-						$columnsDataString = $columnsData -join ", "
-
-						$sqlCommandText = @"
-						INSERT INTO Artifacts ('@timestamp', system_name, user_name, event_description, tool, file_name, source_file, file_type, $columnsString)
-						VALUES ('$timestamp', '$systemName', '$user_name', '$event_description', '$tool', '$file_name', '$source_file', '$fileType', $columnsDataString);
+						$typeTableName = Get-ArtifactTypeTableName -FileType $fileType
+						if (-not $typeInsertCommands.ContainsKey($typeTableName)) {
+							Ensure-ArtifactTypeTable -sqliteConnection $sqliteConnection -TableName $typeTableName
+							$typeInsertCommand = $sqliteConnection.CreateCommand()
+							$typeInsertCommand.CommandText = @"
+INSERT OR REPLACE INTO [$typeTableName]
+(event_id, attributes_json)
+VALUES (@event_id, @attributes_json);
 "@
-
-
-						if ([string]::IsNullOrWhiteSpace($sqlCommandText)) {
-							Write-Log "Generated SQL command is empty for line number $lineNumber. Skipping."
-						} else {
-							$batch += $sqlCommandText
-							$lineNumber++
+							[void]$typeInsertCommand.Parameters.Add("@event_id", [System.Data.DbType]::Int64)
+							[void]$typeInsertCommand.Parameters.Add("@attributes_json", [System.Data.DbType]::String)
+							$typeInsertCommand.Transaction = $transaction
+							$typeInsertCommands[$typeTableName] = $typeInsertCommand
 						}
 
-						if ($batch.Count -ge $batchSize) {
-							try {
-								Process-Batch -batch $batch -sqliteConnection $sqliteConnection -filePath $filePath -LogFilePath $LogFilePath
-							} catch {
-								Write-Log "An error occurred while processing the batch. Error: $_"
+						$attributesJson = Convert-RowToAttributesJson -Row $row -Columns $columns
+						$typeCmd = $typeInsertCommands[$typeTableName]
+						$typeCmd.Parameters["@event_id"].Value = $eventId
+						$typeCmd.Parameters["@attributes_json"].Value = if ([string]::IsNullOrWhiteSpace($attributesJson)) { [DBNull]::Value } else { $attributesJson }
+						$typeCmd.ExecuteNonQuery() | Out-Null
+						$lineNumber++
+						$rowsInTransaction++
+
+						if (($rowsInTransaction % $batchSize) -eq 0) {
+							$transaction.Commit()
+							$transaction.Dispose()
+							$transaction = $sqliteConnection.BeginTransaction()
+							$coreInsertCommand.Transaction = $transaction
+							foreach ($existingTypeCommand in $typeInsertCommands.Values) {
+								$existingTypeCommand.Transaction = $transaction
 							}
-							$batch = New-Object System.Collections.ArrayList
 						}
 					}
 
-					if ($batch.Count -gt 0) {
-						Write-Log "Processing final batch of size $($batch.Count)"
-						try {
-							Process-Batch -batch $batch -sqliteConnection $sqliteConnection -filePath $filePath -LogFilePath $LogFilePath
-						} catch {
-							Write-Log "An error occurred while processing the final batch. Error: $_"
-						}
-						$batch.Clear()
+					$transaction.Commit()
+					$skipReasonSummary = if ($skipReasons.Count -gt 0) {
+						($skipReasons.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name):$($_.Value)" }) -join "; "
+					} else {
+						"none"
 					}
+					Write-Log "Inserted $lineNumber row(s) from $filePath (read=$rowsRead skipped=$rowsSkipped reasons=$skipReasonSummary)"
+					return $lineNumber
 				} catch {
 					Write-Log "An error occurred while processing the CSV file $filePath. Error: $_"
-				} finally {
-					$parser.Close()
-				}
-			}
-
-			function Process-Batch {
-				param (
-					[System.Collections.ArrayList]$batch,
-					[System.Data.SQLite.SQLiteConnection]$sqliteConnection,
-					[string]$filePath,
-					[string]$LogFilePath
-				)
-
-				if ([string]::IsNullOrWhiteSpace($filePath)) {
-					Write-Log "The file path is empty or null in Process-Batch."
-					return
-				}
-				if ([string]::IsNullOrWhiteSpace($LogFilePath)) {
-					Write-Log "The log file path is empty or null in Process-Batch."
-					return
-				}
-
-				$transaction = $null
-				try {
-					$transaction = $sqliteConnection.BeginTransaction()
-					foreach ($sqlCommandText in $batch) {
-						$insertCommand = $sqliteConnection.CreateCommand()
-						$insertCommand.CommandText = $sqlCommandText
-						try {
-							$insertCommand.ExecuteNonQuery() | Out-Null
-						} catch {
-							Write-Log "Error executing SQL command: $sqlCommandText. Error: $_"
-							throw $_  # rethrow the error to be caught in the outer catch block
-						} finally {
-							if ($insertCommand) {
-								$insertCommand.Dispose()  # Dispose of the command object after use
-							}
-						}
-					}
-					$transaction.Commit()
-				} catch {
-					Write-Log "Failed to insert batch into Artifacts table from file: $filePath. Error: $_"
 					if ($transaction) {
-						$transaction.Rollback()
+						try { $transaction.Rollback() } catch {}
 					}
-					throw $_  # rethrow the error to indicate failure in batch processing
+					return 0
 				} finally {
 					if ($transaction) {
 						$transaction.Dispose()
 					}
+					if ($coreInsertCommand) {
+						$coreInsertCommand.Dispose()
+					}
+					foreach ($existingTypeCommand in $typeInsertCommands.Values) {
+						$existingTypeCommand.Dispose()
+					}
+					if ($parser) {
+						$parser.Close()
+					}
+				}
+			}
+
+			function Get-ArtifactTypeTableName {
+				param(
+					[string]$FileType
+				)
+
+				$rawType = if ([string]::IsNullOrWhiteSpace($FileType)) { 'unknown' } else { $FileType.ToLowerInvariant() }
+				$safeType = $rawType -replace '[^a-z0-9_]', '_'
+				if ([string]::IsNullOrWhiteSpace($safeType)) {
+					$safeType = 'unknown'
+				}
+				return "artifact_{0}" -f $safeType
+			}
+
+			function Ensure-ArtifactTypeTable {
+				param(
+					[System.Data.SQLite.SQLiteConnection]$sqliteConnection,
+					[string]$TableName
+				)
+
+				$createTypeTableCommand = $sqliteConnection.CreateCommand()
+				$createTypeTableCommand.CommandText = @"
+CREATE TABLE IF NOT EXISTS [$TableName] (
+    event_id INTEGER PRIMARY KEY,
+    attributes_json TEXT,
+    FOREIGN KEY(event_id) REFERENCES events_core(event_id) ON DELETE CASCADE
+);
+"@
+				try {
+					$createTypeTableCommand.ExecuteNonQuery() | Out-Null
+				} finally {
+					$createTypeTableCommand.Dispose()
+				}
+			}
+
+			function Convert-RowToAttributesJson {
+				param(
+					[hashtable]$Row,
+					[string[]]$Columns
+				)
+
+				$maxAttributes = 64
+				$maxValueLength = 1024
+				$maxJsonLength = 8192
+				$attributes = [ordered]@{}
+				foreach ($columnName in $Columns) {
+					if ([string]::IsNullOrWhiteSpace($columnName)) {
+						continue
+					}
+					if (
+						$columnName -ieq '@timestamp' -or
+						$columnName -ieq 'timestamp' -or
+						$columnName -ieq 'system_name' -or
+						$columnName -ieq 'user_name' -or
+						$columnName -ieq 'event_description' -or
+						$columnName -ieq 'tool' -or
+						$columnName -ieq 'file_name' -or
+						$columnName -ieq 'source_file' -or
+						$columnName -ieq 'file_type'
+					) {
+						continue
+					}
+					$value = $Row[$columnName]
+					if ($null -eq $value) {
+						continue
+					}
+					$stringValue = [string]$value
+					if ([string]::IsNullOrWhiteSpace($stringValue)) {
+						continue
+					}
+					if ($stringValue.Length -gt $maxValueLength) {
+						$stringValue = $stringValue.Substring(0, $maxValueLength)
+					}
+					$attributes[$columnName] = $stringValue
+					if ($attributes.Count -ge $maxAttributes) {
+						break
+					}
+				}
+
+				if ($attributes.Count -eq 0) {
+					return $null
+				}
+
+				$json = ($attributes | ConvertTo-Json -Compress -Depth 5)
+				if ($json.Length -gt $maxJsonLength) {
+					$json = $json.Substring(0, $maxJsonLength)
+				}
+				return $json
+			}
+
+			function Invoke-TimelineIngestHelper {
+				param (
+					[string]$Mode,
+					[string]$HelperPath,
+					[string]$SQLiteAssemblyPath,
+					[string]$DatabasePath,
+					[string]$CsvPath,
+					[string]$Tool,
+					[string]$SystemName,
+					[string]$FileType
+				)
+
+				if ([string]::IsNullOrWhiteSpace($HelperPath) -or -not (Test-Path -LiteralPath $HelperPath -PathType Leaf)) {
+					return @{ Success = $false; RowsInserted = 0; Message = "Helper not found at path: $HelperPath" }
+				}
+
+				$helperArgs = @(
+					"--mode", $Mode,
+					"--db", $DatabasePath,
+					"--csv", $CsvPath,
+					"--sqlite", $SQLiteAssemblyPath,
+					"--tool", $Tool,
+					"--system", $SystemName,
+					"--filetype", $FileType,
+					"--batch", "10000"
+				)
+
+				try {
+					$output = & $HelperPath @helperArgs 2>&1
+					$exitCode = $LASTEXITCODE
+					$outputText = ($output | Out-String).Trim()
+					if ($exitCode -ne 0) {
+						return @{ Success = $false; RowsInserted = 0; Message = "Helper exited with code $exitCode. Output: $outputText" }
+					}
+
+					$rowsInserted = 0
+					$rowsRead = 0
+					$rowsSkipped = 0
+					foreach ($line in ($outputText -split "`r?`n")) {
+						if ($line -match '^ROWS_READ=(\d+)$') {
+							$rowsRead = [int]$matches[1]
+							continue
+						}
+						if ($line -match '^ROWS_INSERTED=(\d+)$') {
+							$rowsInserted = [int]$matches[1]
+							continue
+						}
+						if ($line -match '^ROWS_SKIPPED=(\d+)$') {
+							$rowsSkipped = [int]$matches[1]
+							continue
+						}
+					}
+
+					return @{ Success = $true; RowsRead = $rowsRead; RowsInserted = $rowsInserted; RowsSkipped = $rowsSkipped; Message = $outputText }
+				} catch {
+					return @{ Success = $false; RowsRead = 0; RowsInserted = 0; RowsSkipped = 0; Message = "Helper invocation failed. Error: $_" }
 				}
 			}
 
@@ -3548,6 +3883,7 @@ function ProcessTimelineArtifactsButton_Click {
                 Write-Log "Starting Process-TimelineArtifacts with tools: $SelectedTools"
                 Write-Log "Database path: $DatabasePath"
                 Write-Log "Log file path: $LogFilePath"
+				Write-Log "Timeline ingest helper path: $TimelineIngestHelperPath"
 
                 # Initialize SQLite connection
                 $connectionString = "Data Source=$DatabasePath;Version=3;"
@@ -3561,11 +3897,11 @@ function ProcessTimelineArtifactsButton_Click {
 					"PRAGMA journal_mode = MEMORY;",
 					"PRAGMA temp_store = MEMORY;",
 					"PRAGMA cache_size = -50000;",  # Approximately 50 MB cache size
-					"PRAGMA locking_mode = EXCLUSIVE;",
 					"PRAGMA mmap_size = 2147483648;",  # 2 GB memory-mapped I/O
 					"PRAGMA page_size = 4096;",  # Ensure this is compatible with your database initialization
 					"PRAGMA cache_spill = FALSE;",
-					"PRAGMA wal_autocheckpoint = 10000;"
+					"PRAGMA wal_autocheckpoint = 10000;",
+					"PRAGMA busy_timeout = 120000;"
 				)
 
                 foreach ($pragmaCommand in $pragmaCommands) {
@@ -3575,10 +3911,25 @@ function ProcessTimelineArtifactsButton_Click {
                 }
                 Write-Log "Applied PRAGMA settings."
 
-                # Create a table if it doesn't exist
-                $createTableCommand = $sqliteConnection.CreateCommand()
-                $createTableCommand.CommandText = @"
-                CREATE TABLE IF NOT EXISTS Artifacts (
+				$createSourceIngestCommand = $sqliteConnection.CreateCommand()
+				$createSourceIngestCommand.CommandText = @"
+                CREATE TABLE IF NOT EXISTS ArtifactSourceIngest (
+                    source_hash TEXT PRIMARY KEY,
+                    source_file TEXT,
+                    tool TEXT,
+                    system_name TEXT,
+                    file_type TEXT,
+                    rows_inserted INTEGER,
+                    processed_utc TEXT
+                );
+"@
+				$createSourceIngestCommand.ExecuteNonQuery() | Out-Null
+				Write-Log "Table 'ArtifactSourceIngest' created or already exists."
+
+				$createEventsCoreCommand = $sqliteConnection.CreateCommand()
+				$createEventsCoreCommand.CommandText = @"
+                CREATE TABLE IF NOT EXISTS events_core (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     '@timestamp' TEXT,
                     system_name TEXT,
                     user_name TEXT,
@@ -3589,13 +3940,24 @@ function ProcessTimelineArtifactsButton_Click {
                     file_type TEXT
                 );
 "@
-                $createTableCommand.ExecuteNonQuery()
-                Write-Log "Table 'Artifacts' created or already exists."
-				
-				# Create an index on the @timestamp column if it doesn't exist
-				$createIndexCommand = $sqliteConnection.CreateCommand()
-				$createIndexCommand.CommandText = "CREATE INDEX IF NOT EXISTS idx_timestamp ON Artifacts([@timestamp]);"
-				$createIndexCommand.ExecuteNonQuery()			
+				$createEventsCoreCommand.ExecuteNonQuery() | Out-Null
+				$createEventsCoreCommand.Dispose()
+				Write-Log "Table 'events_core' created or already exists."
+
+				$normalizedIndexCommands = @(
+					"CREATE INDEX IF NOT EXISTS idx_events_core_timestamp ON events_core([@timestamp]);",
+					"CREATE INDEX IF NOT EXISTS idx_events_core_tool_timestamp ON events_core(tool, [@timestamp]);",
+					"CREATE INDEX IF NOT EXISTS idx_events_core_system_timestamp ON events_core(system_name, [@timestamp]);",
+					"CREATE INDEX IF NOT EXISTS idx_events_core_source_file ON events_core(source_file);",
+					"CREATE INDEX IF NOT EXISTS idx_events_core_file_type ON events_core(file_type);"
+				)
+				foreach ($normalizedIndexSql in $normalizedIndexCommands) {
+					$normalizedIndexCommand = $sqliteConnection.CreateCommand()
+					$normalizedIndexCommand.CommandText = $normalizedIndexSql
+					$normalizedIndexCommand.ExecuteNonQuery() | Out-Null
+					$normalizedIndexCommand.Dispose()
+				}
+				Write-Log "Normalized indexes ensured for events_core."
 
                 # Load existing file hashes
                 $existingHashes = @{}
@@ -3611,6 +3973,8 @@ function ProcessTimelineArtifactsButton_Click {
                         $existingHashes = @{}
                     }
                 }
+				$hashesUpdated = $false
+				$totalRowsInserted = 0
 
 				# Process Tools
 				$tools = @{
@@ -3633,11 +3997,6 @@ function ProcessTimelineArtifactsButton_Click {
 							Write-Log "No CSV files found in $toolPath"
 						} else {
 							foreach ($csvFile in $csvFiles) {
-								# Exclude files in the Registry subfolder
-								if ($csvFile.FullName -like "*\Zimmermantools*\Registry\*\*") {
-									continue
-								}
-
 								$fileHash = Get-FileHash -FilePath $csvFile.FullName
 								if ($null -eq $fileHash) {
 									Write-Log "File $($csvFile.FullName) is inaccessible, skipping."
@@ -3654,35 +4013,11 @@ function ProcessTimelineArtifactsButton_Click {
 								$parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($csvFile.FullName)
 								$parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
 								$parser.SetDelimiters(",")
-								$headers = $parser.ReadFields()
-								$columns = $headers | ForEach-Object { $_.Trim() }
-								
-								# Ensure all columns exist in the database
-								foreach ($column in $columns) {
-									$columnSafe = $column -replace '[^a-zA-Z0-9_]', '_'
-									if ($columnSafe -eq 'Group') {
-										$columnSafe = '_group'
-									}
-									if ($column -ne 'timestamp' -and $column -ne 'system_name' -and $column -ne 'user_name' -and $column -ne 'file_name' -and $column -ne 'source_file' -and $column -ne 'file_type') {
-										$alterTableCommand = $sqliteConnection.CreateCommand()
-										$alterTableCommand.CommandText = "ALTER TABLE Artifacts ADD COLUMN '$columnSafe' TEXT;"
-										try {
-											$alterTableCommand.ExecuteNonQuery()
-										} catch {
-											# Ignore error if column already exists
-										}
-									}
-								}
-
-								# Add this block to explicitly handle 'Timestamp' column
-								if ($columns -contains 'Timestamp') {
-									$alterTableCommand = $sqliteConnection.CreateCommand()
-									$alterTableCommand.CommandText = "ALTER TABLE Artifacts ADD COLUMN 'Timestamp' TEXT;"
-									try {
-										$alterTableCommand.ExecuteNonQuery()
-									} catch {
-										# Ignore error if column already exists
-									}
+								try {
+									$headers = $parser.ReadFields()
+									$columns = $headers | ForEach-Object { $_.Trim() }
+								} finally {
+									$parser.Close()
 								}
 
 								# Get the file type from the folder name (e.g., EventLogs, FileFolderAccess)
@@ -3693,14 +4028,102 @@ function ProcessTimelineArtifactsButton_Click {
 								$systemName = $relativePath.Split('\')[0]
 
 								# Process the CSV file
-								Process-CSVFile -filePath $csvFile.FullName -sqliteConnection $sqliteConnection -systemName $systemName -fileType $fileType -tool $tool.Key -columns $columns -LogFilePath $LogFilePath
+								$rowsInserted = 0
+								$usedHelper = $false
+								$fileNameOnly = [System.IO.Path]::GetFileName($csvFile.FullName)
+								$helperMode = $null
+								if ($tool.Key -eq 'Zimmermantools') {
+									if ($fileNameOnly -like '*EvtxECmd_Output.csv') {
+										$helperMode = 'zimmerman-evtx'
+									} elseif ($fileNameOnly -like '*_MFTECmd_$MFT_Output.csv' -or $fileNameOnly -like '*_MFTECmd_$J_Output.csv') {
+										$helperMode = 'zimmerman-mfte'
+									} elseif ($fileNameOnly -like '*_Windows_Joined_PropertyStore_*.csv' -or $fileNameOnly -like '*_Windows_SystemIndex_1_PropertyStore_*.csv') {
+										$helperMode = 'zimmerman-propertystore'
+									} elseif ($fileNameOnly -like '*_SrumECmd_*.csv') {
+										$helperMode = 'zimmerman-srum'
+									}
+								}
+
+								if ($helperMode) {
+									Write-Log "Attempting helper ingest for high-volume file: $($csvFile.FullName)"
+									try {
+										if ($sqliteConnection.State -eq [System.Data.ConnectionState]::Open) {
+											$sqliteConnection.Close()
+										}
+									} catch {
+										Write-Log "Warning: failed to close SQLite connection before helper call. Error: $_"
+									}
+
+									$helperResult = Invoke-TimelineIngestHelper `
+										-Mode $helperMode `
+										-HelperPath $TimelineIngestHelperPath `
+										-SQLiteAssemblyPath $AssemblyPath `
+										-DatabasePath $DatabasePath `
+										-CsvPath $csvFile.FullName `
+										-Tool $tool.Key `
+										-SystemName $systemName `
+										-FileType $fileType
+
+									try {
+										$sqliteConnection.Open()
+									} catch {
+										Write-Log "Failed to reopen SQLite connection after helper call. Error: $_"
+										throw
+									}
+
+									if ($helperResult.Success) {
+										$rowsInserted = [int]$helperResult.RowsInserted
+										$usedHelper = $true
+										Write-Log "Helper ingest completed for $($csvFile.FullName). Rows read: $($helperResult.RowsRead) inserted: $rowsInserted skipped: $($helperResult.RowsSkipped)"
+									} else {
+										Write-Log "Helper ingest failed for $($csvFile.FullName). Falling back to PowerShell path. Details: $($helperResult.Message)"
+									}
+								}
+
+								if (-not $usedHelper) {
+									$rowsInserted = Process-CSVFile -filePath $csvFile.FullName -sqliteConnection $sqliteConnection -systemName $systemName -fileType $fileType -tool $tool.Key -columns $columns -LogFilePath $LogFilePath
+								}
+
+								$ingestCommand = $sqliteConnection.CreateCommand()
+								$ingestCommand.CommandText = @"
+INSERT OR REPLACE INTO ArtifactSourceIngest (source_hash, source_file, tool, system_name, file_type, rows_inserted, processed_utc)
+VALUES (@source_hash, @source_file, @tool, @system_name, @file_type, @rows_inserted, @processed_utc);
+"@
+								[void]$ingestCommand.Parameters.Add("@source_hash", [System.Data.DbType]::String)
+								[void]$ingestCommand.Parameters.Add("@source_file", [System.Data.DbType]::String)
+								[void]$ingestCommand.Parameters.Add("@tool", [System.Data.DbType]::String)
+								[void]$ingestCommand.Parameters.Add("@system_name", [System.Data.DbType]::String)
+								[void]$ingestCommand.Parameters.Add("@file_type", [System.Data.DbType]::String)
+								[void]$ingestCommand.Parameters.Add("@rows_inserted", [System.Data.DbType]::Int32)
+								[void]$ingestCommand.Parameters.Add("@processed_utc", [System.Data.DbType]::String)
+								$ingestCommand.Parameters["@source_hash"].Value = $fileHash
+								$ingestCommand.Parameters["@source_file"].Value = $csvFile.FullName
+								$ingestCommand.Parameters["@tool"].Value = $tool.Key
+								$ingestCommand.Parameters["@system_name"].Value = $systemName
+								$ingestCommand.Parameters["@file_type"].Value = $fileType
+								$ingestCommand.Parameters["@rows_inserted"].Value = [int]$rowsInserted
+								$ingestCommand.Parameters["@processed_utc"].Value = [DateTime]::UtcNow.ToString("o")
+								$ingestCommand.ExecuteNonQuery() | Out-Null
+								$ingestCommand.Dispose()
+								$totalRowsInserted += [int]$rowsInserted
 
 								# Add file hash to the log
 								$existingHashes[$fileHash] = $csvFile.FullName
-								$existingHashes.GetEnumerator() | ConvertTo-Json | Set-Content -Path $HashLogPath
+								$hashesUpdated = $true
 							}
 						}
 					}
+				}
+
+				if ($hashesUpdated) {
+					$existingHashes.GetEnumerator() | ConvertTo-Json | Set-Content -Path $HashLogPath
+					Write-Log "Updated processed hash cache at $HashLogPath"
+				}
+
+				if ($totalRowsInserted -gt 0) {
+					Write-Log "Ingest completed. Total rows inserted this run: $totalRowsInserted"
+				} else {
+					Write-Log "No new rows inserted."
 				}
 
                 # Close the SQLite connection
@@ -3712,9 +4135,9 @@ function ProcessTimelineArtifactsButton_Click {
         }
 
         # Call the function inside the job
-        Process-TimelineArtifacts -SelectedTools $SelectedTools -DatabasePath $DatabasePath -LogFilePath $LogFilePath -HashLogPath $HashLogPath -ZimmermanToolsPath $ZimmermanToolsPath -chainsawPath $chainsawPath -hayabusaPath $hayabusaPath -zircolitePath $zircolitePath
+        Process-TimelineArtifacts -SelectedTools $SelectedTools -DatabasePath $DatabasePath -LogFilePath $LogFilePath -HashLogPath $HashLogPath -ZimmermanToolsPath $ZimmermanToolsPath -chainsawPath $chainsawPath -hayabusaPath $hayabusaPath -zircolitePath $zircolitePath -TimelineIngestHelperPath $TimelineIngestHelperPath
 
-    } -ArgumentList ($SelectedTools, $databasePath, $logFilePath, $hashLogPath, $zimmermanToolsPath, $assemblyPath, $chainsawPath, $hayabusaPath, $zircolitePath)
+    } -ArgumentList ($SelectedTools, $databasePath, $logFilePath, $hashLogPath, $zimmermanToolsPath, $assemblyPath, $chainsawPath, $hayabusaPath, $zircolitePath, $timelineIngestHelperPath)
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $Global:timelineartifactsJobs += [PSCustomObject]@{

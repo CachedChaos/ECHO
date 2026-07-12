@@ -63,5 +63,32 @@ foreach ($marker in $forbiddenMarkers) {
     }
 }
 
+# Build timeline ingest helper (companion binary for heavy timeline ingestion paths).
+$helperSource = Join-Path $PSScriptRoot "TimelineIngestHelper.cs"
+$sqliteRef = Join-Path $sourceDir "Tools\SQLite\System.Data.SQLite.dll"
+$helperSourceDir = Join-Path $sourceDir "Helpers"
+$helperBuildDir = Join-Path $PSScriptRoot "Helpers"
+$helperExeSource = Join-Path $helperSourceDir "TimelineIngestHelper.exe"
+$helperExeBuild = Join-Path $helperBuildDir "TimelineIngestHelper.exe"
+
+if (-not (Test-Path -LiteralPath $sqliteRef -PathType Leaf)) {
+    throw "Build validation failed: SQLite reference not found for helper compile -> $sqliteRef"
+}
+
+New-Item -ItemType Directory -Path $helperSourceDir -Force | Out-Null
+New-Item -ItemType Directory -Path $helperBuildDir -Force | Out-Null
+
+if (Test-Path -LiteralPath $helperExeSource) { Remove-Item -LiteralPath $helperExeSource -Force }
+if (Test-Path -LiteralPath $helperExeBuild) { Remove-Item -LiteralPath $helperExeBuild -Force }
+
+Add-Type -Path $helperSource `
+    -ReferencedAssemblies @($sqliteRef, "System.Data.dll", "Microsoft.VisualBasic.dll") `
+    -OutputAssembly $helperExeSource `
+    -OutputType ConsoleApplication
+
+Copy-Item -LiteralPath $helperExeSource -Destination $helperExeBuild -Force
+Copy-Item -LiteralPath $sqliteRef -Destination (Join-Path $helperSourceDir "System.Data.SQLite.dll") -Force
+Copy-Item -LiteralPath $sqliteRef -Destination (Join-Path $helperBuildDir "System.Data.SQLite.dll") -Force
+
 # Call PS2EXE (adjust icon path if needed)
 Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6.3' -product 'Evidence Handling & Processing Orchestrator'
