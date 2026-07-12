@@ -91,4 +91,4 @@ Copy-Item -LiteralPath $sqliteRef -Destination (Join-Path $helperSourceDir "Syst
 Copy-Item -LiteralPath $sqliteRef -Destination (Join-Path $helperBuildDir "System.Data.SQLite.dll") -Force
 
 # Call PS2EXE (adjust icon path if needed)
-Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6.3' -product 'Evidence Handling & Processing Orchestrator'
+Invoke-PS2EXE $output (Join-Path $PSScriptRoot "ECHO.exe") -noConsole -noOutput -requireAdmin -icon (Join-Path $sourceDir "ECHOicon.ico") -title 'ECHO' -version '0.2.6.2' -product 'Evidence Handling & Processing Orchestrator'
