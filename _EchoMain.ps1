@@ -1182,6 +1182,7 @@ function Update-Log {
 				</ComboBox>
 				<ComboBox x:Name="CollectUALOperationsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="390,145,0,0" Width="130">
 					<ComboBoxItem Content="Limited Operations" />
+					<ComboBoxItem Content="Mailbox Activities" />
 					<ComboBoxItem Content="All Operations" />
 				</ComboBox>				
 				<ComboBox x:Name="CollectUALDateComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="525,145,0,0" Width="105">
@@ -1189,38 +1190,36 @@ function Update-Log {
 					<ComboBoxItem Content="Custom Date" />
 				</ComboBox>				
 				<DatePicker x:Name="M365StartDatePicker" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="635,145,0,0" Width="120" IsEnabled="False"/>				
-				<Button x:Name="CollectMALButton" Content="Mailbox Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,170,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMALComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,170,0,0" Width="105">
-					<ComboBoxItem Content="Entire Tenant" />
-					<ComboBoxItem Content="Custom Users" />
-				</ComboBox>				
-				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,195,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,220,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,220,0,0" Width="105">
+				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,170,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,195,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,195,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>
-				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,245,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,245,0,0" Width="105">
+				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,220,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,220,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>				
-				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,270,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,295,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,295,0,0" Width="105">
+				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,245,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,270,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,270,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,320,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,320,0,0" Width="105">
+				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,295,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,295,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,345,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,345,0,0" Width="105">
+				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,320,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,320,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
-				</ComboBox>						
+				</ComboBox>
+				<Button x:Name="ParseUALButton" Content="Parse UAL Files" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,350,0,0" Width="150"/>
+				<CheckBox x:Name="ParseUALGeoLiteCheckBox" Content="Use GeoLite city lookup" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,353,0,0"/>
+				<CheckBox x:Name="ParseUALOverwriteCheckBox" Content="Overwrite parsed files" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="355,353,0,0"/>
 				<TextBox x:Name="M365TextBox" Text="" HorizontalAlignment="Center" Width="740" VerticalAlignment="Bottom" Height="100" Margin="10" TextWrapping="Wrap" IsReadOnly="True"/>		
 				<!-- Add your controls here -->
 			</Grid>
@@ -1564,11 +1563,12 @@ CONNECT AND TEST CLIENT CONNECTION:
 
 CUSTOMIZE LOG COLLECTION:
 - Open lists of 'Custom IPs' and 'Custom Users' to specify targeted log collection using speicif IPs or User names.
-- 'Collect Triage' attempts to gather a comprehensive set of logs using default arguments, excluding Mailbox Audit Logs (MAL) and Message Trace for efficiency.
+- 'Collect Triage' attempts to gather a comprehensive set of logs using default arguments, excluding Message Trace for efficiency.
 
 SELECTIVE LOG COLLECTION:
-- Choose specific types of logs like 'Unified Audit Logs', 'Mailbox Audit Logs', 'Admin Logs', 'Inbox Rules', 'Forwarding Rules', 'M365 Info', 'Message Trace', 'Azure Logs', and 'Last Password Change'.
+- Choose specific types of logs like 'Unified Audit Logs', 'Admin Logs', 'Inbox Rules', 'Forwarding Rules', 'M365 Info', 'Message Trace', 'Azure Logs', and 'Last Password Change'. Use the Unified Audit Log's 'Mailbox Activities' preset for mailbox audit events.
 - Configure each log type with specific parameters like user scope (entire tenant or custom users), IP addresses, operations, and date ranges.
+- Use 'Parse UAL Files' to recursively expand AuditData JSON into Parsed_UAL CSV files. Already parsed source files are skipped by default; select overwrite to rebuild them. Optionally enrich client IP addresses with GeoLite city, state, and country data.
 
 USER AND IP FILTERING:
 - Selectively collect logs for specific users or IP addresses, providing focused and relevant data for analysis.
@@ -2604,14 +2604,6 @@ $OnCollectUALDateComboBoxSelectionChanged = {
     }
 }
 $CollectUALDateComboBox.Add_SelectionChanged($OnCollectUALDateComboBoxSelectionChanged)
-$CollectMALButton = $window.FindName("CollectMALButton")
-$CollectMALButton.Add_Click({ CollectMALButton_Click })
-$CollectMALComboBox = $window.FindName("CollectMALComboBox")
-if ($CollectMALComboBox -ne $null) {
-    $CollectMALComboBox.SelectedIndex = 0
-} else {
-    Write-Host "ComboBox not found."
-}
 $CollectAdminLogsButton = $window.FindName("CollectAdminLogsButton")
 $CollectAdminLogsButton.Add_Click({ CollectAdminLogsButton_Click })
 $CollectInboxRulesButton = $window.FindName("CollectInboxRulesButton")
@@ -2656,6 +2648,10 @@ if ($CollectLastPasswordComboBox -ne $null) {
 } else {
     Write-Host "ComboBox not found."
 }
+$ParseUALButton = $window.FindName("ParseUALButton")
+$ParseUALButton.Add_Click({ ParseUALButton_Click })
+$ParseUALGeoLiteCheckBox = $window.FindName("ParseUALGeoLiteCheckBox")
+$ParseUALOverwriteCheckBox = $window.FindName("ParseUALOverwriteCheckBox")
 $OpenCustomIPListButton.Add_Click({
     Start-Process $global:ipAddressesFilePath
 })

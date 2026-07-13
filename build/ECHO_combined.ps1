@@ -5458,7 +5458,7 @@ function Check-M365TriageJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Triage Collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Triage collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Write-Host "$timestamp Triage Collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
             }
@@ -5490,7 +5490,7 @@ function Check-M365UALJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Unified Audit Logs Collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Unified Audit Logs collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Write-Host "$timestamp Unified Audit Logs Collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
             }
@@ -5501,39 +5501,6 @@ function Check-M365UALJobStatus {
     if ($completedCount -eq $Global:m365UALJobs.Count) {
         Update-Log "All Unified Audit Logs Collections completed." "M365TextBox"
         $m365UALJobTimer.Stop()
-    }
-}
-
-#Timer for collect MAL
-$Global:m365MALJobs = @()
-$m365MALJobTimer = New-Object System.Windows.Forms.Timer
-$m365MALJobTimer.Interval = 2000
-$m365MALJobTimer.Add_Tick({
-    Check-M365MALJobStatus
-})
-
-function Check-M365MALJobStatus {	
-    # Initialize the completed job count
-    $completedCount = 0
-	
-    foreach ($job in $Global:m365MALJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Mailbox Audit Logs Collection completed: $($job.JobName)" "M365TextBox"
-				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\MailboxAuditLogs" "M365TextBox"
-				Write-Host "$timestamp Mailbox Audit Logs Collection completed: $($job.JobName)"
-				$job.DataAdded = $true		
-            }
-			$completedCount++
-        }
-	}
-	
-    if ($completedCount -eq $Global:m365MALJobs.Count) {
-        Update-Log "All Mailbox Audit Logs Collections completed." "M365TextBox"
-        $m365MALJobTimer.Stop()
     }
 }
 
@@ -5555,7 +5522,7 @@ function Check-M365AdminLogsJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Admin Logs Collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Admin Logs collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\AdminAuditLog" "M365TextBox"
 				Write-Host "$timestamp Admin Logs Collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5588,7 +5555,7 @@ function Check-M365InboxRulesJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Inbox Rules Collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Inbox Rules collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\InboxRules" "M365TextBox"
 				Write-Host "$timestamp Inbox Rules Collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5621,7 +5588,7 @@ function Check-M365ForwardingRulesJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Forwarding Rules Collection completed: $($job.JobName)"
+                Update-Log "Forwarding Rules collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\ForwardingRules" "M365TextBox"
 				Write-Host "$timestamp Forwarding Rules Collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5654,7 +5621,7 @@ function Check-M365InfoJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "MS65 Info completed: $($job.JobName)" "M365TextBox"
+                Update-Log "M365 Info collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\M365Info" "M365TextBox"
 				Write-Host "$timestamp MS65 Info completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5687,7 +5654,7 @@ function Check-M365MessageTraceJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Message Trace completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Message Trace collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\MessageTrace" "M365TextBox"
 				Write-Host "$timestamp Message Trace completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5720,7 +5687,7 @@ function Check-M365AzureLogsJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Azure log collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Azure log collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\AzureLogs" "M365TextBox"
 				Write-Host "$timestamp Azure log collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5743,7 +5710,7 @@ $m365LastPassJobTimer.Add_Tick({
     Check-M365LastPassJobStatus
 })
 
-function Check-M365LastPassJobStatus {	
+function Check-M365LastPassJobStatus {
     # Initialize the completed job count
     $completedCount = 0
 	
@@ -5753,7 +5720,7 @@ function Check-M365LastPassJobStatus {
             Write-M365JobOutput -JobInfo $job -LogTarget "M365TextBox"
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Last Password Change Log collection completed: $($job.JobName)" "M365TextBox"
+                Update-Log "Last Password Change collection finished: $($job.JobName) (status: $($updatedJob.State))" "M365TextBox"
 				Update-Log "Results in $($Global:CurrentCaseDirectory)\M365Evidence\LastPasswordChange" "M365TextBox"
 				Write-Host "$timestamp Last Password Change Log collection completed: $($job.JobName)"
 				$job.DataAdded = $true		
@@ -5779,10 +5746,22 @@ function Write-M365JobOutput {
     }
 
     try {
+        $currentJob = Get-Job -Id $JobInfo.JobObject.Id -ErrorAction SilentlyContinue
+        if ($currentJob -and $currentJob.State -eq 'Failed') {
+            $JobInfo.Failed = $true
+            $reason = $currentJob.ChildJobs[0].JobStateInfo.Reason
+            Update-Log "FAILED: $($JobInfo.JobName)$(if ($reason) { ": $($reason.Message)" })" $LogTarget
+        } else {
+            $JobInfo.Failed = $false
+        }
         $jobOutput = Receive-Job -Id $JobInfo.JobObject.Id -Keep -ErrorAction SilentlyContinue
         if ($jobOutput) {
             foreach ($entry in @($jobOutput)) {
                 if (-not [string]::IsNullOrWhiteSpace([string]$entry)) {
+                    if ([string]$entry -match 'Microsoft Graph authentication expired or is unavailable') {
+                        $Global:M365GraphConnected = $false
+                        Set-M365GraphButtonStates -Enabled $false
+                    }
                     foreach ($line in ([string]$entry -split "(`r`n|`n|`r)")) {
                         if (-not [string]::IsNullOrWhiteSpace($line)) {
                             Update-Log $line $LogTarget
@@ -5801,17 +5780,40 @@ function Write-M365JobOutput {
 }
 
 function Get-M365PendingClientJobs {
+    # Prune completed jobs that were already logged so long-running GUI sessions
+    # do not accumulate PowerShell job objects indefinitely.
+    foreach ($collectionName in @(
+        'm365triageJobs','m365UALJobs','m365AdminLogsJobs','m365InboxRulesJobs',
+        'm365ForwardingRulesJobs','m365InfoJobs','m365MessageTraceJobs',
+        'm365AzureLogsJobs','m365LastPassJobs','m365GraphConnectionJobs','m365UALParseJobs'
+    )) {
+        $collection = @((Get-Variable -Name $collectionName -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
+        $retained = @()
+        foreach ($jobInfo in $collection) {
+            if (-not $jobInfo -or -not $jobInfo.JobObject) { continue }
+            $job = Get-Job -Id $jobInfo.JobObject.Id -ErrorAction SilentlyContinue
+            $processed = $jobInfo.DataAdded -or $jobInfo.Processed
+            if ($job -and $processed -and $job.State -in @('Completed','Failed','Stopped')) {
+                Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+            } else {
+                $retained += $jobInfo
+            }
+        }
+        Set-Variable -Name $collectionName -Scope Global -Value $retained
+    }
+
     $jobCollections = @(
         $Global:m365triageJobs,
         $Global:m365UALJobs,
-        $Global:m365MALJobs,
         $Global:m365AdminLogsJobs,
         $Global:m365InboxRulesJobs,
         $Global:m365ForwardingRulesJobs,
         $Global:m365InfoJobs,
         $Global:m365MessageTraceJobs,
         $Global:m365AzureLogsJobs,
-        $Global:m365LastPassJobs
+        $Global:m365LastPassJobs,
+        $Global:m365GraphConnectionJobs,
+        $Global:m365UALParseJobs
     )
 
     $pendingJobs = @()
@@ -5845,6 +5847,13 @@ function Test-M365CanStartRequest {
         [string]$RequestedAction
     )
 
+    foreach ($pipeValue in @($Global:CurrentCaseDirectory, $Global:usernamesFilePath, $Global:ipAddressesFilePath)) {
+        if ($pipeValue -and [string]$pipeValue -match ';') {
+            Update-Log "Microsoft 365 paths cannot contain semicolons because they are reserved by the worker protocol: $pipeValue" "M365TextBox"
+            return $false
+        }
+    }
+
     $pendingJobs = @(Get-M365PendingClientJobs)
     if ($pendingJobs.Count -eq 0) {
         return $true
@@ -5855,6 +5864,299 @@ function Test-M365CanStartRequest {
     return $false
 }
 
+# Graph authentication runs through the same backend process that performs the
+# collections. The GUI only monitors this client job, so WPF remains responsive.
+$Global:m365GraphConnectionJobs = @()
+$m365GraphConnectionJobTimer = New-Object System.Windows.Forms.Timer
+$m365GraphConnectionJobTimer.Interval = 1000
+$m365GraphConnectionJobTimer.Add_Tick({
+    foreach ($jobInfo in @($Global:m365GraphConnectionJobs)) {
+        if (-not $jobInfo -or $jobInfo.Processed) { continue }
+        $job = Get-Job -Id $jobInfo.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $job) { continue }
+
+        $newOutput = @(Receive-Job -Id $job.Id -ErrorAction SilentlyContinue)
+        foreach ($entry in $newOutput) {
+            $message = [string]$entry
+            $jobInfo.Output += $message
+            if ($message -match '^GRAPH_AUTH_INFO\|(.*)$') {
+                $authMessage = $matches[1]
+                Update-Log $authMessage "M365TextBox"
+                if ($authMessage -match 'https://[^\s]+') {
+                    Open-M365DefaultBrowserUrl -Url $matches[0] | Out-Null
+                }
+            }
+        }
+
+        if ($job.State -notin @('Completed', 'Failed', 'Stopped')) { continue }
+
+        $response = @($jobInfo.Output) -join "`r`n"
+        if ($job.State -eq 'Completed' -and $response -match 'GRAPH_AUTH_SUCCESS\|(.+)') {
+            $Global:M365GraphConnected = $true
+            Update-Log "Connected to Microsoft Graph as $($matches[1])." "M365TextBox"
+            Update-Log "Graph-backed collections are ready." "M365TextBox"
+        } else {
+            $Global:M365GraphConnected = $false
+            if ([string]::IsNullOrWhiteSpace($response)) {
+                $jobReason = $job.ChildJobs[0].JobStateInfo.Reason
+                $response = if ($jobReason) {
+                    $jobReason.Message
+                } else {
+                    'The Graph connection job failed without returning details.'
+                }
+            }
+            Update-Log "Failed to connect to Microsoft Graph: $response" "M365TextBox"
+        }
+        Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
+        $ConnectGraphButton.IsEnabled = $Global:M365ExchangeConnected
+        $jobInfo.Processed = $true
+    }
+
+    if (@($Global:m365GraphConnectionJobs | Where-Object { -not $_.Processed }).Count -eq 0) {
+        $m365GraphConnectionJobTimer.Stop()
+    }
+})
+
+$Global:m365UALParseJobs = @()
+$m365UALParseJobTimer = New-Object System.Windows.Forms.Timer
+$m365UALParseJobTimer.Interval = 1000
+$m365UALParseJobTimer.Add_Tick({
+    $remaining = 0
+    foreach ($jobInfo in @($Global:m365UALParseJobs)) {
+        if (-not $jobInfo -or $jobInfo.Processed) { continue }
+        $job = Get-Job -Id $jobInfo.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $job -or $job.State -notin @('Completed','Failed','Stopped')) {
+            $remaining++
+            continue
+        }
+        $output = @(Receive-Job -Id $job.Id -ErrorAction SilentlyContinue)
+        foreach ($line in $output) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+                Update-Log ([string]$line) 'M365TextBox'
+            }
+        }
+        if ($job.State -eq 'Failed') {
+            $reason = $job.ChildJobs[0].JobStateInfo.Reason
+            Update-Log "UAL parsing failed$(if ($reason) { ": $($reason.Message)" })." 'M365TextBox'
+        } else {
+            Update-Log "UAL parsing finished. Results are in $($jobInfo.OutputPath)" 'M365TextBox'
+        }
+        $jobInfo.Processed = $true
+        Remove-Job -Id $job.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($remaining -eq 0) {
+        $m365UALParseJobTimer.Stop()
+        $Global:m365UALParseJobs = @($Global:m365UALParseJobs | Where-Object { -not $_.Processed })
+        if ($ParseUALButton) { $ParseUALButton.IsEnabled = $true }
+    }
+})
+
+function ParseUALButton_Click {
+    if (-not (Test-M365CanStartRequest -RequestedAction 'UAL parsing')) { return }
+
+    $ualPath = Join-Path $Global:CurrentCaseDirectory 'M365Evidence\UnifiedAuditLogs'
+    if (-not (Test-Path -LiteralPath $ualPath -PathType Container)) {
+        Update-Log "Unified Audit Logs folder was not found: $ualPath" 'M365TextBox'
+        return
+    }
+    $inputFiles = @(Get-ChildItem -LiteralPath $ualPath -Filter '*.csv' -File -ErrorAction SilentlyContinue)
+    if ($inputFiles.Count -eq 0) {
+        Update-Log "No CSV files were found in $ualPath" 'M365TextBox'
+        return
+    }
+
+    $useGeoLite = [bool]$ParseUALGeoLiteCheckBox.IsChecked
+    $overwriteParsed = [bool]$ParseUALOverwriteCheckBox.IsChecked
+    $cityDatabase = $null
+    if ($useGeoLite) {
+        $cityDatabase = Get-ChildItem -LiteralPath $toolsDirectory -Filter 'GeoLite2-City.mmdb' -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName -First 1
+        if (-not $cityDatabase) {
+            Update-Log "Use GeoLite was selected, but GeoLite2-City.mmdb was not found under $toolsDirectory. Download it from Tool Management or clear the option." 'M365TextBox'
+            return
+        }
+        if (-not (Get-Command -Name python -ErrorAction SilentlyContinue)) {
+            Update-Log "Use GeoLite requires Python with the geoip2 package, but python was not found in PATH." 'M365TextBox'
+            return
+        }
+    }
+
+    $outputPath = Join-Path $ualPath 'Parsed_UAL'
+    if (-not $overwriteParsed) {
+        $inputFiles = @($inputFiles | Where-Object {
+            $expectedOutput = Join-Path $outputPath ("{0}_Parsed.csv" -f $_.BaseName)
+            -not (Test-Path -LiteralPath $expectedOutput -PathType Leaf)
+        })
+        if ($inputFiles.Count -eq 0) {
+            Update-Log "All Unified Audit Log CSV files have already been parsed. Select 'Overwrite parsed files' to rebuild them." 'M365TextBox'
+            return
+        }
+    }
+    $ParseUALButton.IsEnabled = $false
+    Update-Log "Parsing $($inputFiles.Count) new Unified Audit Log CSV file(s) into $outputPath$(if ($useGeoLite) { ' with GeoLite enrichment' })$(if ($overwriteParsed) { ' (overwrite enabled)' })." 'M365TextBox'
+
+    $job = Start-Job -ScriptBlock {
+        param($ualPath, $outputPath, $useGeoLite, $cityDatabase, $overwriteParsed)
+
+        function Add-FlattenedValue {
+            param($Value, [string]$Prefix, [System.Collections.IDictionary]$Target)
+            if ($null -eq $Value) {
+                $Target[$Prefix] = $null
+                return
+            }
+            if ($Value -is [System.Collections.IDictionary]) {
+                foreach ($key in $Value.Keys) {
+                    Add-FlattenedValue -Value $Value[$key] -Prefix "$Prefix.$key" -Target $Target
+                }
+                return
+            }
+            if ($Value -isnot [string] -and $Value -is [System.Collections.IEnumerable]) {
+                $index = 0
+                foreach ($item in $Value) {
+                    Add-FlattenedValue -Value $item -Prefix "$Prefix[$index]" -Target $Target
+                    $index++
+                }
+                if ($index -eq 0) { $Target[$Prefix] = '' }
+                return
+            }
+            $properties = @($Value.PSObject.Properties | Where-Object { $_.MemberType -in @('NoteProperty','Property') })
+            if ($properties.Count -gt 0 -and $Value -isnot [string] -and $Value -isnot [datetime]) {
+                foreach ($property in $properties) {
+                    Add-FlattenedValue -Value $property.Value -Prefix "$Prefix.$($property.Name)" -Target $Target
+                }
+                return
+            }
+            $Target[$Prefix] = $Value
+        }
+
+        function Get-NormalizedClientIP {
+            param([System.Collections.IDictionary]$Values)
+            foreach ($name in @('AuditData.ClientIP','AuditData.ClientIPAddress','AuditData.ActorIpAddress','ClientIP')) {
+                if (-not $Values.Contains($name) -or [string]::IsNullOrWhiteSpace([string]$Values[$name])) { continue }
+                $candidate = ([string]$Values[$name]).Trim()
+                if ($candidate -match '^\[([^\]]+)\](?::\d+)?$') { return $matches[1] }
+                if ($candidate -match '^(\d{1,3}(?:\.\d{1,3}){3}):\d+$') { return $matches[1] }
+                return $candidate
+            }
+            return $null
+        }
+
+        if (-not (Test-Path -LiteralPath $outputPath)) {
+            New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+        }
+
+        $geoMap = @{}
+        if ($useGeoLite) {
+            & python -c 'import geoip2.database' 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Python package 'geoip2' is required for GeoLite enrichment. Install it with: python -m pip install geoip2"
+            }
+            $allIPs = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            foreach ($file in Get-ChildItem -LiteralPath $ualPath -Filter '*.csv' -File) {
+                $expectedOutput = Join-Path $outputPath ("{0}_Parsed.csv" -f $file.BaseName)
+                if (-not $overwriteParsed -and (Test-Path -LiteralPath $expectedOutput -PathType Leaf)) { continue }
+                foreach ($row in Import-Csv -LiteralPath $file.FullName) {
+                    try {
+                        $audit = $row.AuditData | ConvertFrom-Json -ErrorAction Stop
+                        $values = @{}
+                        Add-FlattenedValue -Value $audit -Prefix 'AuditData' -Target $values
+                        $ip = Get-NormalizedClientIP -Values $values
+                        if ($ip) { $null = $allIPs.Add($ip) }
+                    } catch {}
+                }
+            }
+            $ipInput = Join-Path $env:TEMP ("echo_ual_ips_{0}.txt" -f [guid]::NewGuid())
+            $geoOutput = Join-Path $env:TEMP ("echo_ual_geo_{0}.csv" -f [guid]::NewGuid())
+            try {
+                $allIPs | Set-Content -LiteralPath $ipInput -Encoding UTF8
+                $python = @'
+import csv, ipaddress, sys
+import geoip2.database
+db_path, input_path, output_path = sys.argv[1:4]
+with geoip2.database.Reader(db_path) as reader, open(input_path, encoding='utf-8-sig') as src, open(output_path, 'w', newline='', encoding='utf-8') as dst:
+    fields = ['IP','City','State','Country','CountryCode','Latitude','Longitude']
+    writer = csv.DictWriter(dst, fieldnames=fields)
+    writer.writeheader()
+    for raw in src:
+        ip = raw.strip()
+        if not ip:
+            continue
+        row = dict.fromkeys(fields, '')
+        row['IP'] = ip
+        try:
+            address = ipaddress.ip_address(ip)
+            if address.is_private or address.is_loopback or address.is_link_local or address.is_multicast:
+                writer.writerow(row)
+                continue
+            result = reader.city(ip)
+            row.update(City=result.city.name or '', State=result.subdivisions.most_specific.name or '', Country=result.country.name or '', CountryCode=result.country.iso_code or '', Latitude=result.location.latitude or '', Longitude=result.location.longitude or '')
+        except Exception:
+            pass
+        writer.writerow(row)
+'@
+                & python -c $python $cityDatabase $ipInput $geoOutput
+                if ($LASTEXITCODE -ne 0) { throw 'GeoLite lookup process failed.' }
+                foreach ($geo in Import-Csv -LiteralPath $geoOutput) { $geoMap[$geo.IP] = $geo }
+            } finally {
+                Remove-Item -LiteralPath $ipInput,$geoOutput -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        foreach ($file in Get-ChildItem -LiteralPath $ualPath -Filter '*.csv' -File) {
+            $outputFile = Join-Path $outputPath ("{0}_Parsed.csv" -f $file.BaseName)
+            if (-not $overwriteParsed -and (Test-Path -LiteralPath $outputFile -PathType Leaf)) {
+                Write-Output "Skipped already parsed file: $($file.Name)"
+                continue
+            }
+            $flattenedRows = [System.Collections.Generic.List[object]]::new()
+            $columnSet = [ordered]@{}
+            foreach ($row in Import-Csv -LiteralPath $file.FullName) {
+                $flat = [ordered]@{}
+                foreach ($property in $row.PSObject.Properties) {
+                    if ($property.Name -ne 'AuditData') {
+                        $flat[$property.Name] = $property.Value
+                        $columnSet[$property.Name] = $true
+                    }
+                }
+                try {
+                    $audit = $row.AuditData | ConvertFrom-Json -ErrorAction Stop
+                    Add-FlattenedValue -Value $audit -Prefix 'AuditData' -Target $flat
+                } catch {
+                    $flat['AuditData.ParseError'] = $_.Exception.Message
+                    $flat['AuditData.Raw'] = $row.AuditData
+                }
+                $flat['ParsedClientIP'] = Get-NormalizedClientIP -Values $flat
+                foreach ($geoColumn in @('GeoCity','GeoState','GeoCountry','GeoCountryCode','GeoLatitude','GeoLongitude')) { $flat[$geoColumn] = '' }
+                if ($useGeoLite -and $flat['ParsedClientIP'] -and $geoMap.ContainsKey([string]$flat['ParsedClientIP'])) {
+                    $geo = $geoMap[[string]$flat['ParsedClientIP']]
+                    $flat['GeoCity'] = $geo.City; $flat['GeoState'] = $geo.State; $flat['GeoCountry'] = $geo.Country
+                    $flat['GeoCountryCode'] = $geo.CountryCode; $flat['GeoLatitude'] = $geo.Latitude; $flat['GeoLongitude'] = $geo.Longitude
+                }
+                foreach ($key in $flat.Keys) { $columnSet[$key] = $true }
+                $flattenedRows.Add($flat)
+            }
+
+            $priority = @('ParsedClientIP','GeoCity','GeoState','GeoCountry','GeoCountryCode','GeoLatitude','GeoLongitude')
+            $columns = @($columnSet.Keys | Where-Object { $_ -notin $priority })
+            $insertAfter = [array]::IndexOf($columns, 'AuditData.ClientIP')
+            if ($insertAfter -lt 0) { $insertAfter = [array]::IndexOf($columns, 'AuditData.ClientIPAddress') }
+            if ($insertAfter -lt 0) { $insertAfter = [Math]::Min($columns.Count - 1, 4) }
+            $beforeColumns = if ($insertAfter -ge 0) { @($columns[0..$insertAfter]) } else { @() }
+            $afterColumns = if (($insertAfter + 1) -lt $columns.Count) { @($columns[($insertAfter + 1)..($columns.Count - 1)]) } else { @() }
+            $columns = @($beforeColumns + $priority + $afterColumns | Select-Object -Unique)
+            $flattenedRows | ForEach-Object {
+                $record = [ordered]@{}
+                foreach ($column in $columns) { $record[$column] = $_[$column] }
+                [PSCustomObject]$record
+            } | Export-Csv -LiteralPath $outputFile -NoTypeInformation -Encoding UTF8
+            Write-Output "Parsed $($flattenedRows.Count) row(s): $outputFile"
+        }
+    } -ArgumentList $ualPath, $outputPath, $useGeoLite, $cityDatabase, $overwriteParsed
+
+    $Global:m365UALParseJobs += @{ JobObject = $job; JobName = "UALParser_$(Get-Date -Format 'yyyyMMdd_HHmmss')"; OutputPath = $outputPath; Processed = $false }
+    $m365UALParseJobTimer.Start()
+}
+
 function Set-M365ExchangeButtonStates {
     param(
         [bool]$Enabled
@@ -5863,7 +6165,6 @@ function Set-M365ExchangeButtonStates {
     foreach ($control in @(
         $CollectTriageButton,
         $CollectUALButton,
-        $CollectMALButton,
         $CollectAdminLogsButton,
         $CollectInboxRulesButton,
         $CollectForwardingRulesButton,
@@ -5891,149 +6192,11 @@ function Set-M365GraphButtonStates {
         $CollectLastPasswordChangeButton
     )) {
         if ($control) {
-            $control.IsEnabled = $Enabled
+            # The click handlers can initiate or retry Graph authentication.
+            # Keep these controls available once the Exchange pipe is ready.
+            $control.IsEnabled = $Global:M365ExchangeConnected
         }
     }
-}
-
-function Test-M365GraphConnection {
-    try {
-        $graphContext = Get-MgContext
-        if (-not $graphContext -or -not $graphContext.Account) {
-            return $false
-        }
-
-        Get-MgOrganization -Top 1 -ErrorAction Stop | Out-Null
-        return $true
-    } catch {
-        return $false
-    }
-}
-
-function Write-M365CollectionNotice {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$Message
-    )
-
-    $directory = Split-Path -Path $Path -Parent
-    if ($directory -and -not (Test-Path $directory)) {
-        New-Item -ItemType Directory -Path $directory | Out-Null
-    }
-
-    Set-Content -Path $Path -Value $Message
-}
-
-function Export-M365CollectionData {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowNull()]
-        [object]$Data,
-        [Parameter(Mandatory = $true)]
-        [string]$CsvPath,
-        [Parameter(Mandatory = $true)]
-        [string]$EmptyMessage
-    )
-
-    $items = @($Data | Where-Object { $null -ne $_ })
-    if ($items.Count -gt 0) {
-        $items | Export-Csv -Path $CsvPath -NoTypeInformation
-        return "Saved $($items.Count) record(s) to $CsvPath"
-    }
-
-    $noticePath = [System.IO.Path]::ChangeExtension($CsvPath, ".txt")
-    Write-M365CollectionNotice -Path $noticePath -Message $EmptyMessage
-    return $EmptyMessage
-}
-
-function Convert-M365UnifiedAuditRecord {
-    param(
-        [Parameter(Mandatory = $true)]
-        $Record
-    )
-
-    $auditData = $null
-    try {
-        if ($Record.AuditData) {
-            $auditData = $Record.AuditData | ConvertFrom-Json -ErrorAction Stop
-        }
-    } catch {
-        $auditData = $null
-    }
-
-    [PSCustomObject]@{
-        RecordType          = $Record.RecordType
-        CreationDate        = $Record.CreationDate
-        UserIds             = $Record.UserIds
-        Operations          = $Record.Operations
-        Identity            = $Record.Identity
-        ResultIndex         = $Record.ResultIndex
-        ResultCount         = $Record.ResultCount
-        Workload            = if ($auditData) { $auditData.Workload } else { $null }
-        Operation           = if ($auditData) { $auditData.Operation } else { $null }
-        UserId              = if ($auditData) { $auditData.UserId } else { $null }
-        ClientIP            = if ($auditData) { $auditData.ClientIP } else { $null }
-        ObjectId            = if ($auditData) { $auditData.ObjectId } else { $null }
-        MailboxOwnerUPN     = if ($auditData) { $auditData.MailboxOwnerUPN } else { $null }
-        DestMailboxOwnerUPN = if ($auditData) { $auditData.DestMailboxOwnerUPN } else { $null }
-        FolderPathName      = if ($auditData) { $auditData.FolderPathName } else { $null }
-        ItemSubject         = if ($auditData) { $auditData.ItemSubject } else { $null }
-        LogonType           = if ($auditData) { $auditData.LogonType } else { $null }
-        ExternalAccess      = if ($auditData) { $auditData.ExternalAccess } else { $null }
-        AuditData           = $Record.AuditData
-    }
-}
-
-function Invoke-UnifiedAuditLogPagedSearch {
-    param(
-        [Parameter(Mandatory = $true)]
-        [datetime]$StartDate,
-        [Parameter(Mandatory = $true)]
-        [datetime]$EndDate,
-        [string]$RecordType,
-        [string[]]$Operations,
-        [string[]]$UserIds,
-        [string[]]$ObjectIds,
-        [string]$SessionPrefix = "ECHOUAL",
-        [int]$ResultSize = 5000
-    )
-
-    $sessionId = "{0}_{1}" -f $SessionPrefix, ([guid]::NewGuid().ToString())
-    $results = @()
-
-    do {
-        $searchParams = @{
-            StartDate      = $StartDate
-            EndDate        = $EndDate
-            SessionId      = $sessionId
-            SessionCommand = "ReturnLargeSet"
-            ResultSize     = $ResultSize
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($RecordType)) {
-            $searchParams.RecordType = $RecordType
-        }
-        if ($Operations -and $Operations.Count -gt 0) {
-            $searchParams.Operations = $Operations
-        }
-        if ($UserIds -and $UserIds.Count -gt 0) {
-            $searchParams.UserIds = $UserIds
-        }
-        if ($ObjectIds -and $ObjectIds.Count -gt 0) {
-            $searchParams.ObjectIds = $ObjectIds
-        }
-
-        $batch = @(Search-UnifiedAuditLog @searchParams)
-        if (-not $batch -or $batch.Count -eq 0) {
-            break
-        }
-
-        $results += $batch
-    } while ($batch.Count -ge $ResultSize -and $results.Count -lt 50000)
-
-    return $results
 }
 
 function OnTabCollectM365_GotFocus {
@@ -6060,23 +6223,6 @@ function OnTabCollectM365_GotFocus {
     Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
 }
 
-function Disconnect-MsolService {
-    $adalTokenCachePath = Join-Path -Path $env:LOCALAPPDATA -ChildPath "Microsoft\Office\16.0\ADAL"
-    if (Test-Path -Path $adalTokenCachePath) {
-        $adalTokenCacheFiles = Get-ChildItem -Path $adalTokenCachePath -Filter "AdalCacheStorage*"
-        if ($adalTokenCacheFiles.Count -gt 0) {
-            foreach ($adalTokenCacheFile in $adalTokenCacheFiles) {
-                Remove-Item -Path $adalTokenCacheFile.FullName -Force
-            }
-            Write-Host "MSOnline Service connection has been cleared."
-        } else {
-            Write-Host "No token cache found."
-        }
-    } else {
-        Write-Host "No ADAL token cache directory found."
-    }
-}
-
 function Open-M365DefaultBrowserUrl {
     param(
         [Parameter(Mandatory = $true)]
@@ -6090,106 +6236,6 @@ function Open-M365DefaultBrowserUrl {
         return $true
     } catch {
         Update-Log "Failed to open $Url in the default browser: $($_.Exception.Message)" $LogTarget
-        return $false
-    }
-}
-
-function Connect-M365GraphInteractive {
-    param(
-        [string]$LogTarget = "M365TextBox"
-    )
-
-    $graphScopes = @(
-        "AuditLog.Read.All",
-        "Directory.Read.All",
-        "Organization.Read.All",
-        "User.Read.All",
-        "UserAuthenticationMethod.Read.All"
-    )
-
-    $connectParams = @{
-        Scopes       = $graphScopes
-        NoWelcome    = $true
-        ContextScope = 'CurrentUser'
-        ErrorAction  = 'Stop'
-    }
-
-    $disconnectGraphCommand = Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue
-    if ($disconnectGraphCommand) {
-        try {
-            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        } catch {
-        }
-    }
-
-    try {
-        Connect-MgGraph @connectParams | Out-Null
-        Get-MgOrganization -Top 1 -ErrorAction Stop | Out-Null
-        return "Connected to Microsoft Graph."
-    } catch {
-        $initialError = $_.Exception.Message
-        $connectGraphCommand = Get-Command -Name Connect-MgGraph -ErrorAction SilentlyContinue
-
-        if ($connectGraphCommand -and $connectGraphCommand.Parameters.ContainsKey('UseDeviceCode')) {
-            Update-Log "Interactive Microsoft Graph sign-in was unavailable. Trying device code sign-in..." $LogTarget
-
-            if ($disconnectGraphCommand) {
-                try {
-                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-                } catch {
-                }
-            }
-
-            try {
-                Connect-MgGraph @connectParams -UseDeviceCode | Out-Null
-                Get-MgOrganization -Top 1 -ErrorAction Stop | Out-Null
-                return "Connected to Microsoft Graph using device code."
-            } catch {
-                $initialError = $_.Exception.Message
-            }
-        }
-
-        throw "Failed to connect to Microsoft Graph: $initialError"
-    }
-}
-
-function Ensure-M365GraphConnectedInteractive {
-    param(
-        [string]$Reason,
-        [string]$LogTarget = "M365TextBox"
-    )
-
-    if (Test-M365GraphConnection) {
-        $Global:M365GraphConnected = $true
-        Set-M365GraphButtonStates -Enabled $true
-        return $true
-    }
-
-    if ($Reason) {
-        Update-Log "This collection needs Microsoft Graph access for $Reason." $LogTarget
-    }
-
-    $message = "This collection requires Microsoft Graph consent in the target tenant. Connect to Microsoft Graph now?"
-    $caption = "Microsoft Graph Required"
-    $buttons = [System.Windows.MessageBoxButton]::YesNo
-    $icon = [System.Windows.MessageBoxImage]::Information
-    $result = [System.Windows.MessageBox]::Show($message, $caption, $buttons, $icon)
-
-    if ($result -ne 'Yes') {
-        Update-Log "Microsoft Graph connection was skipped by the user." $LogTarget
-        return $false
-    }
-
-    try {
-        $response = Connect-M365GraphInteractive -LogTarget $LogTarget
-        Update-Log $response $LogTarget
-        $Global:M365GraphConnected = $true
-        Set-M365GraphButtonStates -Enabled $true
-        return $true
-    } catch {
-        $Global:M365GraphConnected = $false
-        Set-M365GraphButtonStates -Enabled $false
-        Update-Log $_.Exception.Message $LogTarget
         return $false
     }
 }
@@ -6263,6 +6309,7 @@ function ConnectClientButton_Click {
         if ($response -match "^Connected to Exchange Online") {
             $Global:M365ExchangeConnected = $true
             Set-M365ExchangeButtonStates -Enabled $true
+            Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
             Update-Log "Exchange-backed collections are ready. Graph-backed collections stay separate and will prompt only when needed." "M365TextBox"
         } else {
             $Global:M365ExchangeConnected = $false
@@ -6291,37 +6338,60 @@ function ConnectGraphButton_Click {
     $ConnectGraphButton.IsEnabled = $false
 
     try {
-        if (!(Get-Module -ListAvailable -Name "Microsoft.Graph")) {
-            $message = "The module 'Microsoft.Graph' is required but not installed. Do you want to install it now?"
+        if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication')) {
+            $message = "Microsoft Graph PowerShell is not installed for this Windows user. Install Microsoft.Graph now?"
             $caption = "Module Installation Required"
             $buttons = [System.Windows.MessageBoxButton]::YesNo
             $icon = [System.Windows.MessageBoxImage]::Warning
             $result = [System.Windows.MessageBox]::Show($message, $caption, $buttons, $icon)
 
             if ($result -eq 'Yes') {
-                Update-Log "Installing module 'Microsoft.Graph'. This can take a little while and may appear idle during download/install." "M365TextBox"
+                Update-Log "Installing or repairing 'Microsoft.Graph'. This can take a little while and may appear idle during download/install." "M365TextBox"
                 Install-Module -Name "Microsoft.Graph" -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-                Update-Log "Module 'Microsoft.Graph' installed." "M365TextBox"
+                Update-Log "Microsoft.Graph installation completed." "M365TextBox"
             } else {
                 Update-Log "Module 'Microsoft.Graph' installation skipped by user." "M365TextBox"
                 return
             }
         }
 
-        Update-Log "Starting Microsoft Graph sign-in..." "M365TextBox"
-        Update-Log "If Microsoft asks you to set up additional security info, complete it in your default browser at https://aka.ms/mysecurityinfo and then retry the connection." "M365TextBox"
-        $graphResponse = Connect-M365GraphInteractive -LogTarget "M365TextBox"
-        Update-Log $graphResponse "M365TextBox"
-        $Global:M365GraphConnected = $true
-        Set-M365GraphButtonStates -Enabled $true
-        Update-Log "Graph-backed collections are ready." "M365TextBox"
+        Update-Log "Starting Microsoft Graph device-code sign-in..." "M365TextBox"
+        Update-Log "ECHO will display the Microsoft sign-in code below and open the device-login page." "M365TextBox"
+        $pipeName = $Global:pipeName
+        $job = Start-Job -ScriptBlock {
+            param($pipeName)
+            $pipeClient = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
+            try {
+                $pipeClient.Connect(30000)
+                $writer = New-Object System.IO.StreamWriter($pipeClient)
+                $writer.AutoFlush = $true
+                $reader = New-Object System.IO.StreamReader($pipeClient)
+                $writer.WriteLine('Connect-Graph')
+                while (($line = $reader.ReadLine()) -ne 'END_OF_MESSAGE') {
+                    if ($null -eq $line) { break }
+                    if (-not [string]::IsNullOrWhiteSpace($line)) {
+                        Write-Output $line
+                    }
+                }
+            } finally {
+                $pipeClient.Dispose()
+            }
+        } -ArgumentList $pipeName
+        $Global:m365GraphConnectionJobs += @{
+            JobObject = $job
+            JobName = "GraphConnection_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            Processed = $false
+            Output = @()
+        }
+        $m365GraphConnectionJobTimer.Start()
+        return
     } catch {
         $Global:M365GraphConnected = $false
         Set-M365GraphButtonStates -Enabled $false
         Update-Log $_.Exception.Message "M365TextBox"
     }
 
-    $ConnectGraphButton.IsEnabled = $true
+    $ConnectGraphButton.IsEnabled = $Global:M365ExchangeConnected
 }
 
 function Start-NamedPipeServer {
@@ -6427,6 +6497,7 @@ function Start-NamedPipeServer {
 				[string[]]$Operations,
 				[string[]]$UserIds,
 				[string[]]$ObjectIds,
+				[string[]]$IPAddresses,
 				[string]$SessionPrefix = "ECHOUAL",
 				[int]$ResultSize = 5000
 			)
@@ -6455,6 +6526,9 @@ function Start-NamedPipeServer {
 				if ($ObjectIds -and $ObjectIds.Count -gt 0) {
 					$searchParams.ObjectIds = $ObjectIds
 				}
+				if ($IPAddresses -and $IPAddresses.Count -gt 0) {
+					$searchParams.IPAddresses = $IPAddresses
+				}
 
 				$batch = @(Search-UnifiedAuditLog @searchParams)
 				if (-not $batch -or $batch.Count -eq 0) {
@@ -6464,7 +6538,73 @@ function Start-NamedPipeServer {
 				$results += $batch
 			} while ($batch.Count -ge $ResultSize -and $results.Count -lt 50000)
 
+			if ($results.Count -ge 50000) {
+				throw "Unified Audit Log query reached the 50,000-record session limit for $StartDate through $EndDate. Use a narrower date range before treating the collection as complete."
+			}
+
 			return $results
+		}
+
+		function Invoke-AdaptiveUnifiedAuditLogSearch {
+			param(
+				[Parameter(Mandatory = $true)]
+				[datetime]$StartDate,
+				[Parameter(Mandatory = $true)]
+				[datetime]$EndDate,
+				[string]$RecordType,
+				[string[]]$Operations,
+				[string[]]$UserIds,
+				[string[]]$ObjectIds,
+				[string[]]$IPAddresses,
+				[int]$InitialWindowDays = 7,
+				[int]$MinimumWindowSeconds = 1,
+				[string]$SessionPrefix = 'ECHOAdaptiveUAL'
+			)
+
+			function Invoke-AdaptiveWindow {
+				param([datetime]$WindowStart, [datetime]$WindowEnd)
+
+				$queryParams = @{
+					StartDate     = $WindowStart
+					EndDate       = $WindowEnd
+					SessionPrefix = $SessionPrefix
+					ResultSize    = 5000
+				}
+				if ($RecordType) { $queryParams.RecordType = $RecordType }
+				if ($Operations) { $queryParams.Operations = $Operations }
+				if ($UserIds) { $queryParams.UserIds = $UserIds }
+				if ($ObjectIds) { $queryParams.ObjectIds = $ObjectIds }
+				if ($IPAddresses) { $queryParams.IPAddresses = $IPAddresses }
+
+				try {
+					return @(Invoke-UnifiedAuditLogPagedSearch @queryParams)
+				} catch {
+					if ($_.Exception.Message -notmatch '50,000-record session limit') { throw }
+					$durationSeconds = ($WindowEnd - $WindowStart).TotalSeconds
+					if ($durationSeconds -le $MinimumWindowSeconds) {
+						throw "Unified Audit Log volume exceeds 50,000 records between $WindowStart and $WindowEnd. ECHO stopped rather than return incomplete evidence. Use the Microsoft 365 Management Activity API for this extreme interval."
+					}
+
+					$midpoint = $WindowStart.AddTicks([long](($WindowEnd.Ticks - $WindowStart.Ticks) / 2))
+					Write-Host "UAL window saturated; splitting $WindowStart through $WindowEnd at $midpoint"
+					$left = @(Invoke-AdaptiveWindow -WindowStart $WindowStart -WindowEnd $midpoint)
+					$right = @(Invoke-AdaptiveWindow -WindowStart $midpoint -WindowEnd $WindowEnd)
+					return @($left + $right)
+				}
+			}
+
+			$allResults = @()
+			$windowStart = $StartDate
+			while ($windowStart -lt $EndDate) {
+				$windowEnd = $windowStart.AddDays($InitialWindowDays)
+				if ($windowEnd -gt $EndDate) { $windowEnd = $EndDate }
+				$allResults += @(Invoke-AdaptiveWindow -WindowStart $windowStart -WindowEnd $windowEnd)
+				$windowStart = $windowEnd
+			}
+
+			# Split windows overlap at the midpoint by design so boundary events cannot
+			# fall through a gap. Remove only records with the same stable identity.
+			return @($allResults | Sort-Object Identity, CreationDate, RecordType, Operations -Unique)
 		}
 
 		function Get-GraphAuthenticationMethodSummary {
@@ -6488,6 +6628,7 @@ function Start-NamedPipeServer {
 				return @{
 					MFAMethodTypes = ''
 					MFAStatus = 'Unknown'
+					Error = $_.Exception.Message
 				}
 			}
 
@@ -6495,6 +6636,7 @@ function Start-NamedPipeServer {
 			return @{
 				MFAMethodTypes = ($uniqueTypes -join ', ')
 				MFAStatus = if ($uniqueTypes.Count -gt 0) { 'Registered' } else { 'NotRegistered' }
+				Error = ''
 			}
 		}
 
@@ -6533,18 +6675,34 @@ function Start-NamedPipeServer {
 			} catch {
 			}
 
-			$disconnectGraphCommand = Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue
-			if ($disconnectGraphCommand) {
-				try {
-					Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-				} catch {
-				}
-			}
+			throw 'Microsoft Graph authentication expired or is unavailable. Use Connect Graph and complete device-code sign-in again.'
+		}
 
-			Connect-MgGraph -Scopes $graphScopes -NoWelcome -ContextScope CurrentUser | Out-Null
-			Get-MgOrganization -Top 1 -ErrorAction Stop | Out-Null
-			$script:graphConnected = $true
-			return $true
+		function Connect-Graph {
+			param($Writer)
+			try {
+				$disconnectGraphCommand = Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue
+				if ($disconnectGraphCommand) {
+					Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+				}
+
+				Connect-MgGraph -Scopes $graphScopes -NoWelcome -ContextScope CurrentUser -UseDeviceCode -ErrorAction Stop 6>&1 |
+					ForEach-Object {
+						$message = [string]$_
+						foreach ($messageLine in ($message -split "(`r`n|`n|`r)")) {
+							if (-not [string]::IsNullOrWhiteSpace($messageLine)) {
+								$Writer.WriteLine("GRAPH_AUTH_INFO|$messageLine")
+							}
+						}
+					}
+				Get-MgOrganization -Top 1 -ErrorAction Stop | Out-Null
+				$script:graphConnected = $true
+				$context = Get-MgContext
+				return "GRAPH_AUTH_SUCCESS|$($context.Account)"
+			} catch {
+				$script:graphConnected = $false
+				return "GRAPH_AUTH_FAILED|$($_.Exception.Message)"
+			}
 		}
 
 		function Convert-GraphSignInLog {
@@ -6725,87 +6883,38 @@ function Start-NamedPipeServer {
 			$endDate = (Get-Date)
 
 			if ($Scope -eq "Custom Users") {
-				$specifiedUsers = Get-Content $usernamesFilePath
+				$specifiedUsers = @(Get-Content $usernamesFilePath | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+				if ($specifiedUsers.Count -eq 0) { throw 'Custom Users was selected, but the user list is empty.' }
 			}
 
 			if ($IPScope -eq "Custom IPs") {
-				$specifiedIPs = Get-Content $ipAddressesFilePath
+				$specifiedIPs = @(Get-Content $ipAddressesFilePath | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+				if ($specifiedIPs.Count -eq 0) { throw 'Custom IPs was selected, but the IP address list is empty.' }
 			}
 
 			if ($OperationsScope -eq "All Operations") {
 				$operations = @("*")
+				$allOperations = $true
+			} elseif ($OperationsScope -eq "Mailbox Activities") {
+				$operations = @(
+					"MailItemsAccessed", "FolderBind", "MailboxLogin", "Send", "SendAs", "SendOnBehalf",
+					"Create", "Update", "Move", "MoveToDeletedItems", "SoftDelete", "HardDelete",
+					"New-InboxRule", "Set-InboxRule", "UpdateInboxRules"
+				)
 			} else {
 				$operations = @("UserLoggedIn", "New-InboxRule", "Set-InboxRule", "Update-InboxRule", "AddOAuth2PermissionGrant")
 			}
 
-			function Get-AdjustedInterval {
-				param (
-					[int]$IntervalMinutes,
-					[int]$BatchSize,
-					[int]$ResultCount
-				)
-
-				if ($ResultCount -ge $BatchSize * 0.8) {
-					# If results are close to the batch size limit, reduce the interval increase
-					$NewInterval = $IntervalMinutes + 15
-				} elseif ($ResultCount -ge $BatchSize * 0.5) {
-					# Moderate increase if results are half of the batch size limit
-					$NewInterval = $IntervalMinutes + 30
-				} else {
-					# Otherwise, increase more significantly
-					$NewInterval = $IntervalMinutes + 60
-				}
-
-				# Check if the new interval exceeds the maximum allowed value (1440 minutes)
-				if ($NewInterval -gt 1440) {
-					$NewInterval = 1440
-				}
-
-				return $NewInterval
+			$queryParams = @{
+				StartDate         = [datetime]::ParseExact($startDate, "yyyy-MM-dd", $null)
+				EndDate           = $endDate
+				InitialWindowDays = if ($specifiedUsers) { 30 } else { 7 }
+				SessionPrefix     = 'ECHOUAL'
 			}
-
-			# Search the Unified Audit Logs and save the results
-			$intervalMinutes = 30  # Start with a smaller interval
-			$maxIntervalMinutes = 1440
-			$batchSize = 5000
-			$allResults = @()
-			$currentStart = [datetime]::ParseExact($startDate, "yyyy-MM-dd", $null)
-
-			while ($currentStart -lt $endDate) {
-				$currentEnd = $currentStart.AddMinutes($intervalMinutes)
-
-				Write-Host "Retrieving audit records for activities performed between $($currentStart) and $($currentEnd)"
-
-				$searchParams = @{
-					StartDate  = $currentStart
-					EndDate    = $currentEnd
-					ResultSize = $batchSize
-				}
-
-				if (-not $allOperations) {
-					$searchParams['Operations'] = $operations
-				}
-
-				if ($specifiedUsers) {
-					$searchParams['UserIds'] = $specifiedUsers
-				}
-
-				if ($specifiedIPs) {
-					$searchParams['IPAddress'] = $specifiedIPs
-				}
-
-				$results = Search-UnifiedAuditLog @searchParams
-				$allResults += $results
-
-				# Adjust the interval based on the returned results
-				$intervalMinutes = Get-AdjustedInterval -IntervalMinutes $intervalMinutes -BatchSize $batchSize -ResultCount $results.Count
-
-				if ($results.Count -eq $batchSize) {
-					$currentStart = $results[-1].CreationDate.AddSeconds(-10)  # Ensure a slight overlap
-				} else {
-					$currentStart = $currentEnd
-				}
-			}
+			if (-not $allOperations) { $queryParams.Operations = $operations }
+			if ($specifiedUsers) { $queryParams.UserIds = $specifiedUsers }
+			if ($specifiedIPs) { $queryParams.IPAddresses = $specifiedIPs }
+			$allResults = @(Invoke-AdaptiveUnifiedAuditLogSearch @queryParams)
 
 			# Save the results in the appropriate file(s)
 			$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
@@ -6855,7 +6964,7 @@ function Start-NamedPipeServer {
 					foreach ($mailbox in $mailboxes) {
 						$mailboxTrimmed = $mailbox.Trim()
 						$user = Get-Mailbox -Identity $mailboxTrimmed
-						$outputFileName = $user.Alias + "_InboxRules.csv"
+						$outputFileName = "$(Get-Date -Format 'yyyyMMdd_HHmmss')_$($user.Alias)_InboxRules.csv"
 						$outputFilePath = Join-Path $inboxRulesPath $outputFileName
 						$inboxRules = Get-InboxRule -Mailbox $mailboxTrimmed
 						$inboxRules | Export-Csv -Path $outputFilePath -NoTypeInformation
@@ -6905,7 +7014,7 @@ function Start-NamedPipeServer {
 							ForwardingSmtpAddress     = $user.ForwardingSmtpAddress
 							DeliverToMailboxAndForward = $user.DeliverToMailboxAndForward
 						}
-						$outputFileName = $user.Alias + "_ForwardingRules.csv"
+						$outputFileName = "$(Get-Date -Format 'yyyyMMdd_HHmmss')_$($user.Alias)_ForwardingRules.csv"
 						$outputFilePath = Join-Path $forwardingRulesPath $outputFileName
 						$forwardingInfo | Export-Csv -Path $outputFilePath -NoTypeInformation
 					}
@@ -6933,7 +7042,7 @@ function Start-NamedPipeServer {
 			
 			try {
 				$csvFilePath = Join-Path $adminAuditLogPath "$(Get-Date -Format 'yyyyMMdd_HHmmss')_AdminAuditLogs.csv"
-				$adminAuditLogs = Invoke-UnifiedAuditLogPagedSearch -StartDate $startDate -EndDate $endDate -RecordType "ExchangeAdmin" -SessionPrefix "ECHOAdminAudit"
+				$adminAuditLogs = Invoke-AdaptiveUnifiedAuditLogSearch -StartDate $startDate -EndDate $endDate -RecordType "ExchangeAdmin" -InitialWindowDays 30 -SessionPrefix "ECHOAdminAudit"
 				$normalizedAdminLogs = $adminAuditLogs | ForEach-Object { Convert-M365UnifiedAuditRecord -Record $_ }
 				return (Export-M365CollectionData -Data $normalizedAdminLogs -CsvPath $csvFilePath -EmptyMessage "No Exchange admin audit events were returned from the unified audit log for the last 90 days. If you expected results, confirm unified audit ingestion and Purview audit permissions.")
 			} catch {
@@ -6941,63 +7050,6 @@ function Start-NamedPipeServer {
 			}
 		}
 
-		function Collect-MailboxAuditLogs {
-			param(
-				[string]$Scope,
-				[string]$currentcasedirectory,
-				[string]$usernamesFilePath
-			)
-		
-			# Create MailboxAuditLogs subdirectory under M365Evidence folder
-			$mailboxAuditLogsPath = Join-Path $currentcasedirectory "M365Evidence\MailboxAuditLogs"
-			if (!(Test-Path $mailboxAuditLogsPath)) {
-				New-Item -ItemType Directory -Path $mailboxAuditLogsPath | Out-Null
-			}
-		
-			$startDate = (Get-Date).AddDays(-90)
-			$endDate = Get-Date
-		
-			switch ($Scope) {
-				"Entire Tenant" {
-					$malTenantPath = Join-Path $mailboxAuditLogsPath "MAL_Tenant"
-					if (!(Test-Path $malTenantPath)) {
-						New-Item -ItemType Directory -Path $malTenantPath | Out-Null
-					}
-
-					$filePath = Join-Path $malTenantPath "$(Get-Date -Format 'yyyyMMdd_HHmmss')_MailboxAuditLogs_Tenant.csv"
-					$mailboxAuditLogs = Invoke-UnifiedAuditLogPagedSearch -StartDate $startDate -EndDate $endDate -RecordType "ExchangeItem" -SessionPrefix "ECHOMailboxAuditTenant"
-					$normalizedMailboxAuditLogs = $mailboxAuditLogs | ForEach-Object { Convert-M365UnifiedAuditRecord -Record $_ }
-					return (Export-M365CollectionData -Data $normalizedMailboxAuditLogs -CsvPath $filePath -EmptyMessage "No mailbox audit events were returned from the unified audit log for the last 90 days. Confirm mailbox auditing is enabled and that Purview audit data is available for this tenant.")
-				}
-		
-				"CustomUsers" {
-					$malIndividualPath = Join-Path $mailboxAuditLogsPath "MAL_Individual"
-					if (!(Test-Path $malIndividualPath)) {
-						New-Item -ItemType Directory -Path $malIndividualPath | Out-Null
-					}
-
-					$identities = if ($usernamesFilePath) {
-						Get-Content $usernamesFilePath | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-					} else {
-						throw "Usernames file path is required for collecting specific users' mailbox audit logs."
-					}
-
-					if (-not $identities -or $identities.Count -eq 0) {
-						throw "No custom usernames were provided for mailbox audit log collection."
-					}
-
-					$mailboxAuditLogs = Invoke-UnifiedAuditLogPagedSearch -StartDate $startDate -EndDate $endDate -RecordType "ExchangeItem" -UserIds $identities -SessionPrefix "ECHOMailboxAuditCustom"
-					$normalizedMailboxAuditLogs = $mailboxAuditLogs | ForEach-Object { Convert-M365UnifiedAuditRecord -Record $_ }
-					$filePath = Join-Path $malIndividualPath "$(Get-Date -Format 'yyyyMMdd_HHmmss')_MailboxAuditLogs_CustomUsers.csv"
-					return (Export-M365CollectionData -Data $normalizedMailboxAuditLogs -CsvPath $filePath -EmptyMessage "No mailbox audit events were returned for the requested user list. Unified audit log mailbox activity can vary by mailbox type, actor, and retention/licensing configuration.")
-				}
-		
-				default {
-					throw "Invalid scope: $Scope"
-				}
-			}
-		}
-		
 		function Collect-MessageTrace {
 			param(
 				[string]$Scope,
@@ -7012,35 +7064,63 @@ function Start-NamedPipeServer {
 			}
 		
 			$endDate = Get-Date
+			$timestampFormat = $endDate.ToString('yyyyMMdd_HHmmss')
 			$useMessageTraceV2 = $null -ne (Get-Command Get-MessageTraceV2 -ErrorAction SilentlyContinue)
 			$startDate = if ($useMessageTraceV2) { $endDate.AddDays(-90) } else { $endDate.AddDays(-10) }
+
+			function Invoke-ECHOMessageTraceQuery {
+				param(
+					[string]$SenderAddress,
+					[string]$RecipientAddress
+				)
+
+				$results = @()
+				$windowStart = $startDate
+				do {
+					$windowEnd = if ($useMessageTraceV2 -and $windowStart.AddDays(10) -lt $endDate) {
+						$windowStart.AddDays(10)
+					} else {
+						$endDate
+					}
+
+					$params = @{
+						StartDate   = $windowStart
+						EndDate     = $windowEnd
+						ErrorAction = 'Stop'
+					}
+					if ($SenderAddress) { $params.SenderAddress = $SenderAddress }
+					if ($RecipientAddress) { $params.RecipientAddress = $RecipientAddress }
+
+					if ($useMessageTraceV2) {
+						$params.ResultSize = 5000
+						$batch = @(Get-MessageTraceV2 @params)
+						if ($batch.Count -ge 5000) {
+							throw "Message trace reached the 5,000-record limit for $windowStart through $windowEnd. Reduce the date window before treating this collection as complete."
+						}
+						$results += $batch
+					} else {
+						$results += @(Get-MessageTrace @params)
+					}
+					$windowStart = $windowEnd
+				} while ($windowStart -lt $endDate)
+
+				return @($results | Sort-Object MessageTraceId, RecipientAddress, Received -Unique)
+			}
 		
 			switch ($Scope) {
 				"Entire Tenant" {
-					$allUsers = Get-Mailbox -ResultSize Unlimited
-					$senderResults = @()
-					$recipientResults = @()
-		
-					foreach ($user in $allUsers) {
-						if ($useMessageTraceV2) {
-							$senderMessageTraces = @(Get-MessageTraceV2 -SenderAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ResultSize 5000 -ErrorAction SilentlyContinue)
-							$recipientMessageTraces = @(Get-MessageTraceV2 -RecipientAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ResultSize 5000 -ErrorAction SilentlyContinue)
-						} else {
-							$senderMessageTraces = @(Get-MessageTrace -SenderAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ErrorAction SilentlyContinue)
-							$recipientMessageTraces = @(Get-MessageTrace -RecipientAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ErrorAction SilentlyContinue)
-						}
-					
-						if ($senderMessageTraces) {
-							$senderResults += $senderMessageTraces
-						}
-						if ($recipientMessageTraces) {
-							$recipientResults += $recipientMessageTraces
-						}
+					$allTraces = @(Invoke-ECHOMessageTraceQuery)
+					$tenantAddresses = @{}
+					Get-Mailbox -ResultSize Unlimited | ForEach-Object {
+						$tenantAddresses[[string]$_.PrimarySmtpAddress] = $true
+						if ($_.UserPrincipalName) { $tenantAddresses[[string]$_.UserPrincipalName] = $true }
 					}
+					$senderResults = @($allTraces | Where-Object { $tenantAddresses.ContainsKey([string]$_.SenderAddress) })
+					$recipientResults = @($allTraces | Where-Object { $tenantAddresses.ContainsKey([string]$_.RecipientAddress) })
 					
 					$traceWindowDescription = if ($useMessageTraceV2) { "last 90 days" } else { "last 10 days because Get-MessageTraceV2 is not available in the current Exchange module" }
-					$senderMessage = Export-M365CollectionData -Data $senderResults -CsvPath (Join-Path $messageTracePath "MessageTrace_Tenant_Sender.csv") -EmptyMessage "No sender-side message trace results were returned for the $traceWindowDescription."
-					$recipientMessage = Export-M365CollectionData -Data $recipientResults -CsvPath (Join-Path $messageTracePath "MessageTrace_Tenant_Recipient.csv") -EmptyMessage "No recipient-side message trace results were returned for the $traceWindowDescription."
+					$senderMessage = Export-M365CollectionData -Data $senderResults -CsvPath (Join-Path $messageTracePath "${timestampFormat}_MessageTrace_Tenant_Sender.csv") -EmptyMessage "No sender-side message trace results were returned for the $traceWindowDescription."
+					$recipientMessage = Export-M365CollectionData -Data $recipientResults -CsvPath (Join-Path $messageTracePath "${timestampFormat}_MessageTrace_Tenant_Recipient.csv") -EmptyMessage "No recipient-side message trace results were returned for the $traceWindowDescription."
 
 					return ("Message trace command used: " + ($(if ($useMessageTraceV2) { "Get-MessageTraceV2" } else { "Get-MessageTrace" })) + "`r`n" + $senderMessage + "`r`n" + $recipientMessage)
 				}
@@ -7056,16 +7136,11 @@ function Start-NamedPipeServer {
 						$mailbox = $mailbox.Trim()
 						$user = Get-Mailbox -Identity $mailbox
 		
-						if ($useMessageTraceV2) {
-							$senderMessageTraces = @(Get-MessageTraceV2 -SenderAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ResultSize 5000 -ErrorAction SilentlyContinue)
-							$recipientMessageTraces = @(Get-MessageTraceV2 -RecipientAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ResultSize 5000 -ErrorAction SilentlyContinue)
-						} else {
-							$senderMessageTraces = @(Get-MessageTrace -SenderAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ErrorAction SilentlyContinue)
-							$recipientMessageTraces = @(Get-MessageTrace -RecipientAddress $user.UserPrincipalName -StartDate $startDate -EndDate $endDate -ErrorAction SilentlyContinue)
-						}
+						$senderMessageTraces = @(Invoke-ECHOMessageTraceQuery -SenderAddress $user.UserPrincipalName)
+						$recipientMessageTraces = @(Invoke-ECHOMessageTraceQuery -RecipientAddress $user.UserPrincipalName)
 		
-						Export-M365CollectionData -Data $senderMessageTraces -CsvPath (Join-Path $messageTracePath "$($user.Alias)_MessageTrace_Sender.csv") -EmptyMessage "No sender-side message trace results were returned for $($user.UserPrincipalName) in the last 90 days." | Out-Null
-						Export-M365CollectionData -Data $recipientMessageTraces -CsvPath (Join-Path $messageTracePath "$($user.Alias)_MessageTrace_Recipient.csv") -EmptyMessage "No recipient-side message trace results were returned for $($user.UserPrincipalName) in the last 90 days." | Out-Null
+						Export-M365CollectionData -Data $senderMessageTraces -CsvPath (Join-Path $messageTracePath "${timestampFormat}_$($user.Alias)_MessageTrace_Sender.csv") -EmptyMessage "No sender-side message trace results were returned for $($user.UserPrincipalName) in the last 90 days." | Out-Null
+						Export-M365CollectionData -Data $recipientMessageTraces -CsvPath (Join-Path $messageTracePath "${timestampFormat}_$($user.Alias)_MessageTrace_Recipient.csv") -EmptyMessage "No recipient-side message trace results were returned for $($user.UserPrincipalName) in the last 90 days." | Out-Null
 					}
 					return "Message trace for specified users collected using $(if ($useMessageTraceV2) { 'Get-MessageTraceV2' } else { 'Get-MessageTrace' })."
 				}
@@ -7089,6 +7164,11 @@ function Start-NamedPipeServer {
 				New-Item -ItemType Directory -Path $azureLogsPath | Out-Null
 			}
 			$timestampFormat = (Get-Date).ToString("yyyyMMdd_HHmmss")
+			# Microsoft Entra activity reports retain at most 30 days for P1/P2
+			# tenants (and commonly 7 days for Free). Query only the supported
+			# activity window; this is separate from Purview UAL retention.
+			$entraActivityStart = (Get-Date).ToUniversalTime().AddDays(-30)
+			$entraActivityStartFilter = $entraActivityStart.ToString('yyyy-MM-ddTHH:mm:ssZ')
 			try {
 				Ensure-GraphConnection | Out-Null
 			} catch {
@@ -7104,39 +7184,19 @@ function Start-NamedPipeServer {
 				$null
 			}
 			
-			function Extract-PropertiesFromCell {
-				param($cellContent)
-			
-				# Normalize line breaks, remove class definitions and braces
-				$cleanContent = $cellContent -replace "`r`n", "`n" -replace "class\s+\w+\s+\{", "" -replace "[\{\}]", ""
-			
-				# Extract properties using regex
-				$properties = @{}
-				$cleanContent -split "`n" | ForEach-Object {
-					if ($_ -match "Id:\s*(\S+)") { $properties["Id"] = $matches[1].Trim() }
-					if ($_ -match "DisplayName:\s*([^\n]*)") { $properties["DisplayName"] = $matches[1].Trim() }
-					if ($_ -match "IpAddress:\s*(\S+)") { $properties["IpAddress"] = $matches[1].Trim() }
-					if ($_ -match "UserPrincipalName:\s*(\S+)") { $properties["UserPrincipalName"] = $matches[1].Trim() }
-					if ($_ -match "ServicePrincipalId:\s*(\S+)") { $properties["ServicePrincipalId"] = $matches[1].Trim() }
-					if ($_ -match "DisplayName:\s*([^\n]+)") { $properties["AppDisplayName"] = $matches[1].Trim() }
-				}
-			
-				return $properties
-			}
-		
-			
-			$messages = @()
+			$messages = @("Requested Microsoft Entra activity logs from $($entraActivityStart.ToString('u')) through $((Get-Date).ToUniversalTime().ToString('u')).")
 
 			# Attempt to collect sign-in logs
 			try {
 				if ($userPrincipalNames) {
 					foreach ($userPrincipalName in $userPrincipalNames) {
 						$userPrincipalName = $userPrincipalName.Trim()
-						$signInLogs = @(Get-MgAuditLogSignIn -All -Filter "userPrincipalName eq '$userPrincipalName'" -ErrorAction Stop)
-						$messages += Export-M365CollectionData -Data ($signInLogs | ForEach-Object { Convert-GraphSignInLog -LogEntry $_ }) -CsvPath (Join-Path $azureLogsPath "$($userPrincipalName)_SignInLogs.csv") -EmptyMessage "No Entra sign-in logs were returned for $userPrincipalName. Sign-in logs require supported Entra roles and Microsoft Entra ID P1/P2 licensing."
+						$escapedUserPrincipalName = $userPrincipalName -replace "'", "''"
+						$signInLogs = @(Get-MgAuditLogSignIn -All -Filter "createdDateTime ge $entraActivityStartFilter and userPrincipalName eq '$escapedUserPrincipalName'" -ErrorAction Stop)
+						$messages += Export-M365CollectionData -Data ($signInLogs | ForEach-Object { Convert-GraphSignInLog -LogEntry $_ }) -CsvPath (Join-Path $azureLogsPath "${timestampFormat}_$($userPrincipalName)_SignInLogs.csv") -EmptyMessage "No Entra sign-in logs were returned for $userPrincipalName. Sign-in logs require supported Entra roles and Microsoft Entra ID P1/P2 licensing."
 					}
 				} else {
-					$signInLogs = @(Get-MgAuditLogSignIn -All -ErrorAction Stop)
+					$signInLogs = @(Get-MgAuditLogSignIn -All -Filter "createdDateTime ge $entraActivityStartFilter" -ErrorAction Stop)
 					$messages += Export-M365CollectionData -Data ($signInLogs | ForEach-Object { Convert-GraphSignInLog -LogEntry $_ }) -CsvPath (Join-Path $azureLogsPath "$($timestampFormat)_AzureSignInLogs_Tenant.csv") -EmptyMessage "No Entra sign-in logs were returned for the tenant. Sign-in logs require Microsoft Entra ID P1/P2 and supported roles such as Reports Reader or Security Reader."
 				}
 			} catch {
@@ -7157,7 +7217,7 @@ function Start-NamedPipeServer {
 			
 			# Attempt to collect audit directory logs
 			try {
-				$auditLogs = @(Get-MgAuditLogDirectoryAudit -All -ErrorAction Stop)
+				$auditLogs = @(Get-MgAuditLogDirectoryAudit -All -Filter "activityDateTime ge $entraActivityStartFilter" -ErrorAction Stop)
 				$auditLogFileName = "${timestampFormat}_AzureAuditLogs_Tenant.csv"
 				$auditLogFilePath = Join-Path $azureLogsPath $auditLogFileName
 				$messages += Export-M365CollectionData -Data ($auditLogs | ForEach-Object { Convert-GraphDirectoryAuditLog -LogEntry $_ }) -CsvPath $auditLogFilePath -EmptyMessage "No Entra directory audit logs were returned. Directory audit logs require AuditLog.Read.All and a supported Entra role such as Reports Reader or Security Reader."
@@ -7198,6 +7258,7 @@ function Start-NamedPipeServer {
 			$OrganizationFile = Join-Path $m365InfoPath "$(Get-Date -Format 'yyyyMMdd_HHmmss')_Organization.csv"
 		
 			$messages = @()
+			$mailboxes = @(Get-Mailbox -ResultSize Unlimited)
 			if (-not $graphAvailable) {
 				$messages += "Microsoft Graph is not connected for M365 info collection: $graphConnectionError"
 			}
@@ -7205,7 +7266,7 @@ function Start-NamedPipeServer {
 			$messages += "Saved admin audit configuration to $AdminAuditLogConfig"
 			Get-CasMailbox -ResultSize unlimited | Export-Csv $casMailboxFile -NoTypeInformation
 			$messages += "Saved CAS mailbox inventory to $casMailboxFile"
-			Get-Mailbox -ResultSize unlimited | Export-Csv $MailboxFile -NoTypeInformation
+			$mailboxes | Export-Csv $MailboxFile -NoTypeInformation
 			$messages += "Saved mailbox inventory to $MailboxFile"
 			if ($graphAvailable) {
 				try {
@@ -7220,7 +7281,6 @@ function Start-NamedPipeServer {
 				Write-M365CollectionNotice -Path ([System.IO.Path]::ChangeExtension($OrganizationFile, ".txt")) -Message "Skipped Microsoft Graph organization export because Graph was not connected. $graphConnectionError"
 			}
 		
-			$mailboxes = Get-Mailbox -ResultSize unlimited
 			$mailboxPermissions = @()
 		
 			foreach ($mailbox in $mailboxes) {
@@ -7279,6 +7339,7 @@ function Start-NamedPipeServer {
 								LastPasswordChangeTimestamp = $_.LastPasswordChangeDateTime
 								MFAStatus = $methodSummary.MFAStatus
 								MFAMethodTypes = $methodSummary.MFAMethodTypes
+								Error = $methodSummary.Error
 							}
 						}
 						return (Export-M365CollectionData -Data $exportData -CsvPath (Join-Path $lastPasswordChangePath "$(Get-Date -Format 'yyyyMMdd_HHmmss')_LastPasswordChange_Tenant.csv") -EmptyMessage "No last-password-change records were returned. Verify Graph permissions, directory visibility, and UserAuthenticationMethod.Read.All consent.")
@@ -7294,18 +7355,29 @@ function Start-NamedPipeServer {
 						throw "Usernames file path is required for collecting specific users' last password change information."
 					}
 		
+					$timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 					foreach ($userPrincipalName in $userPrincipalNames) {
 						$userPrincipalName = $userPrincipalName.Trim()
-						$user = Get-MgUser -UserId $userPrincipalName -Property "Id,UserPrincipalName,LastPasswordChangeDateTime"
-						$methodSummary = Get-GraphAuthenticationMethodSummary -UserId $user.Id
-			
-						[PSCustomObject]@{
-							UserPrincipalName = $user.UserPrincipalName
-							LastPasswordChangeTimestamp = $user.LastPasswordChangeDateTime
-							MFAStatus = $methodSummary.MFAStatus
-							MFAMethodTypes = $methodSummary.MFAMethodTypes
-						} |
-							Export-Csv -Path (Join-Path $lastPasswordChangePath "$($user.UserPrincipalName)_LastPasswordChange.csv") -NoTypeInformation
+						try {
+							$user = Get-MgUser -UserId $userPrincipalName -Property "Id,UserPrincipalName,LastPasswordChangeDateTime" -ErrorAction Stop
+							$methodSummary = Get-GraphAuthenticationMethodSummary -UserId $user.Id
+							$row = [PSCustomObject]@{
+								UserPrincipalName = $user.UserPrincipalName
+								LastPasswordChangeTimestamp = $user.LastPasswordChangeDateTime
+								MFAStatus = $methodSummary.MFAStatus
+								MFAMethodTypes = $methodSummary.MFAMethodTypes
+								Error = $methodSummary.Error
+							}
+						} catch {
+							$row = [PSCustomObject]@{
+								UserPrincipalName = $userPrincipalName
+								LastPasswordChangeTimestamp = $null
+								MFAStatus = 'Unknown'
+								MFAMethodTypes = ''
+								Error = $_.Exception.Message
+							}
+						}
+						$row | Export-Csv -Path (Join-Path $lastPasswordChangePath "${timestamp}_$($userPrincipalName)_LastPasswordChange.csv") -NoTypeInformation
 					}
 					return "Last password change for specified users collected."
 				}
@@ -7353,6 +7425,10 @@ function Start-NamedPipeServer {
                                     $response = Connect-Client
                                     $writer.WriteLine(($response | Out-String).Trim())
                                 }
+								"Connect-Graph" {
+									$response = Connect-Graph -Writer $writer
+									$writer.WriteLine(($response | Out-String).Trim())
+								}
                                 "Test-M365Connection" {
                                     $response = Test-M365Connection
                                     $writer.WriteLine(($response | Out-String).Trim())
@@ -7365,10 +7441,6 @@ function Start-NamedPipeServer {
 									$response = Collect-UAL -Scope $params[0] -currentcasedirectory $params[1] -usernamesFilePath $params[2] -IPScope $params[3] -OperationsScope $params[4] -ipAddressesFilePath $params[5] -StartDate $params[6]
 									$writer.WriteLine($response)
 								}							
-								"Collect-MailboxAuditLogs" {
-									$response = Collect-MailboxAuditLogs -Scope $params[0] -currentcasedirectory $params[1] -usernamesFilePath $params[2]
-									$writer.WriteLine($response)
-								}
 								"Collect-AdminLogs" {
 									$response = Collect-AdminLogs -currentcasedirectory $params[0]
 									$writer.WriteLine($response)
@@ -7629,7 +7701,7 @@ function CollectTriageButton_Click {
 		# Build the command string with all parameters
 		$command = "Collect-Triage;$currentcasedirectory"
 		$response = Send-CommandToProcess -pipeName $pipeName -commandToSend $command
-
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $global:currentcasedirectory, $Global:pipeName
@@ -7651,6 +7723,10 @@ function CollectUALButton_Click {
     $selectedIPOption = $CollectUALIPsComboBox.SelectedItem.Content.ToString()
     $selectedDateOption = $CollectUALDateComboBox.SelectedItem.Content.ToString()
     $selectedOperationsOption = $CollectUALOperationsComboBox.SelectedItem.Content.ToString()
+    if ($selectedDateOption -eq "Custom Date" -and -not $M365StartDatePicker.SelectedDate) {
+        Update-Log "Select a valid start date before collecting Unified Audit Logs." "M365TextBox"
+        return
+    }
     $StartDate = if ($selectedDateOption -eq "Custom Date") { $M365StartDatePicker.SelectedDate } else { (Get-Date).AddDays(-90) }
 	$StartDate = $StartDate.ToString("yyyy-MM-dd")
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -7721,7 +7797,7 @@ function CollectUALButton_Click {
 		# Build the command string with all parameters
 		$command = "Collect-UAL;$selectedUserOption;$currentcasedirectory;$usernamesFilePath;$selectedIPOption;$selectedOperationsOption;$ipAddressesFilePath;$StartDate"
 		$response = Send-CommandToProcess -pipeName $pipeName -commandToSend $command
-
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedUserOption, $global:currentcasedirectory, $global:usernamesFilePath, $selectedIPOption, $selectedOperationsOption, $global:ipAddressesFilePath, $StartDate, $Global:pipeName
@@ -7732,88 +7808,6 @@ function CollectUALButton_Click {
         $m365UALJobTimer.Start()
     }
     Update-Log "Unified Audit Log collection job ($jobName) started." "M365TextBox"
-}
-
-function CollectMALButton_Click {
-    if (-not (Test-M365CanStartRequest -RequestedAction "mailbox audit log collection")) {
-        return
-    }
-    Update-Log "Collecting Mailbox Audit Logs..." "M365TextBox"
-
-	$selectedOption = $CollectMALComboBox.SelectedItem.Content.ToString()
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $jobName = "MALCollection_$timestamp"
-
-    $scriptBlock = {
-        param($selectedOption, $currentcasedirectory, $usernamesFilePath, $pipeName)
-
-		function Send-CommandToProcess {
-			param(
-				[string]$pipeName,
-				[string]$commandToSend
-			)
-			$maxRetries = 10
-			$retryDelay = 2 # seconds
-			$retryCount = 0		
-			
-			while ($retryCount -lt $maxRetries) {
-				try {
-					$pipeClient = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName, [System.IO.Pipes.PipeDirection]::InOut)
-					$pipeClient.Connect(30000)
-		
-					if ($pipeClient.IsConnected) {
-						Write-Host "Connected to server."
-						$streamWriter = New-Object System.IO.StreamWriter($pipeClient)
-						$streamWriter.AutoFlush = $true			
-						$request = ($commandToSend)
-						$streamWriter.WriteLine($request)
-						$streamReader = New-Object System.IO.StreamReader($pipeClient)
-						$responseLines = @()
-						while (($line = $streamReader.ReadLine()) -ne "END_OF_MESSAGE") {
-							if ($line -is [System.Array] -or $line -is [System.Object]) {
-								$line = $line -join "`r`n"
-							}
-							Write-Host "Response from server: $line"
-							if (-not [string]::IsNullOrWhiteSpace($line)) {
-								$responseLines += $line
-							}
-						}
-						$streamWriter.Close()
-						$streamReader.Close()
-						$pipeClient.Close()
-						Write-Host "Message sent, client disconnected."
-						return ($responseLines -join "`r`n")
-					} else {
-						Write-Host "Failed to connect to server. Retrying..."
-						Start-Sleep -Seconds $retryDelay
-						$retryCount++
-					}
-				} catch {
-					Write-Host "Error: $_. Retrying..."
-					Start-Sleep -Seconds $retryDelay
-					$retryCount++
-				}
-			}
-			Write-Host "Failed to connect to server after $maxRetries retries."
-		}
-        # Send command to server and return response
-		if ($selectedOption -eq "Entire Tenant") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MailboxAuditLogs;Entire Tenant;$global:currentcasedirectory"
-		} elseif ($selectedOption -eq "Custom Users") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MailboxAuditLogs;CustomUsers;$global:currentcasedirectory;$global:usernamesFilePath"
-		} else {
-			Write-Host "No option selected for collecting MAL Logs."
-		}
-    }
-    # Start the job and add it to the global job list
-    $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
-    $Global:m365MALJobs += @{JobObject = $job; JobName = $jobName; DataAdded = $false}
-    
-    # Start the timer if not already running
-    if (-not $m365MALJobTimer.Enabled) {
-        $m365MALJobTimer.Start()
-    }
-    Update-Log "Mail Audit Log collection job ($jobName) started." "M365TextBox"
 }
 
 function CollectAdminLogsButton_Click {
@@ -7879,6 +7873,7 @@ function CollectAdminLogsButton_Click {
 		}
         # Send command to server and return response
 		$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-AdminLogs;$currentcasedirectory"
+		return $response
 		return $response
 	}
 
@@ -7957,12 +7952,13 @@ function CollectInboxRulesButton_Click {
 		}
         # Send command to server and return response
 		if ($selectedOption -eq "Entire Tenant") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-InboxRules;Entire Tenant;$global:currentcasedirectory"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-InboxRules;Entire Tenant;$currentcasedirectory"
 		} elseif ($selectedOption -eq "Custom Users") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-InboxRules;CustomUsers;$global:currentcasedirectory;$global:usernamesFilePath"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-InboxRules;CustomUsers;$currentcasedirectory;$usernamesFilePath"
 		} else {
 			Write-Host "No option selected for collecting inbox rules."
 		}
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
@@ -8039,12 +8035,13 @@ function CollectForwardingRulesButton_Click {
 		}
         # Send command to server and return response
 		if ($selectedOption -eq "Entire Tenant") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-ForwardingRules;Entire Tenant;$global:currentcasedirectory"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-ForwardingRules;Entire Tenant;$currentcasedirectory"
 		} elseif ($selectedOption -eq "Custom Users") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-ForwardingRules;CustomUsers;$global:currentcasedirectory;$global:usernamesFilePath"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-ForwardingRules;CustomUsers;$currentcasedirectory;$usernamesFilePath"
 		} else {
 			Write-Host "No option selected for collecting forwarding rules."
 		}
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
@@ -8055,7 +8052,7 @@ function CollectForwardingRulesButton_Click {
         $m365ForwardingRulesJobTimer.Start()
     }
 
-    Update-Log "Inbox rules collection job ($jobName) started." "M365TextBox"
+    Update-Log "Forwarding rules collection job ($jobName) started." "M365TextBox"
 }
 
 function CollectM365InfoButton_Click {
@@ -8197,12 +8194,13 @@ function CollectMessageTraceButton_Click {
 		}
         # Send command to server and return response
 		if ($selectedOption -eq "Entire Tenant") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MessageTrace;Entire Tenant;$global:currentcasedirectory"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MessageTrace;Entire Tenant;$currentcasedirectory"
 		} elseif ($selectedOption -eq "Custom Users") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MessageTrace;CustomUsers;$global:currentcasedirectory;$global:usernamesFilePath"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-MessageTrace;CustomUsers;$currentcasedirectory;$usernamesFilePath"
 		} else {
 			Write-Host "No option selected for collecting inbox rules."
 		}
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
@@ -8216,7 +8214,9 @@ function CollectMessageTraceButton_Click {
 }
 
 function CollectAzureLogsButton_Click {
-    if (-not (Ensure-M365GraphConnectedInteractive -Reason "Entra sign-in and directory audit log collection")) {
+    if (-not $Global:M365GraphConnected) {
+        Update-Log "Azure Logs requires Microsoft Graph. Starting the Graph connection; retry the collection after it completes." "M365TextBox"
+        ConnectGraphButton_Click
         return
     }
     if (-not (Test-M365CanStartRequest -RequestedAction "Entra log collection")) {
@@ -8288,7 +8288,7 @@ function CollectAzureLogsButton_Click {
 		# Build the command string with all parameters
 		$command = "Collect-AzureLogs;$selectedUserOption;$currentcasedirectory;$usernamesFilePath"
 		$response = Send-CommandToProcess -pipeName $pipeName -commandToSend $command
-
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedUserOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
@@ -8302,7 +8302,9 @@ function CollectAzureLogsButton_Click {
 }
 
 function CollectLastPasswordChangeButton_Click {
-    if (-not (Ensure-M365GraphConnectedInteractive -Reason "last password change and MFA method collection")) {
+    if (-not $Global:M365GraphConnected) {
+        Update-Log "Last Password Change requires Microsoft Graph. Starting the Graph connection; retry the collection after it completes." "M365TextBox"
+        ConnectGraphButton_Click
         return
     }
     if (-not (Test-M365CanStartRequest -RequestedAction "last password change collection")) {
@@ -8367,12 +8369,13 @@ function CollectLastPasswordChangeButton_Click {
 		}
         # Send command to server and return response
 		if ($selectedOption -eq "Entire Tenant") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-LastPasswordChange;Entire Tenant;$global:currentcasedirectory"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-LastPasswordChange;Entire Tenant;$currentcasedirectory"
 		} elseif ($selectedOption -eq "Custom Users") {
-			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-LastPasswordChange;CustomUsers;$global:currentcasedirectory;$global:usernamesFilePath"
+			$response = Send-CommandToProcess -pipeName $pipeName -commandToSend "Collect-LastPasswordChange;CustomUsers;$currentcasedirectory;$usernamesFilePath"
 		} else {
 			Write-Host "No option selected for collecting inbox rules."
 		}
+		return $response
     }
     # Start the job and add it to the global job list
     $job = Start-Job -ScriptBlock $scriptBlock -ArgumentList $selectedOption, $global:currentcasedirectory, $global:usernamesFilePath, $Global:pipeName
@@ -12966,6 +12969,7 @@ function Update-Log {
 				</ComboBox>
 				<ComboBox x:Name="CollectUALOperationsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="390,145,0,0" Width="130">
 					<ComboBoxItem Content="Limited Operations" />
+					<ComboBoxItem Content="Mailbox Activities" />
 					<ComboBoxItem Content="All Operations" />
 				</ComboBox>				
 				<ComboBox x:Name="CollectUALDateComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="525,145,0,0" Width="105">
@@ -12973,38 +12977,36 @@ function Update-Log {
 					<ComboBoxItem Content="Custom Date" />
 				</ComboBox>				
 				<DatePicker x:Name="M365StartDatePicker" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="635,145,0,0" Width="120" IsEnabled="False"/>				
-				<Button x:Name="CollectMALButton" Content="Mailbox Audit Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,170,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMALComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,170,0,0" Width="105">
-					<ComboBoxItem Content="Entire Tenant" />
-					<ComboBoxItem Content="Custom Users" />
-				</ComboBox>				
-				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,195,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,220,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,220,0,0" Width="105">
+				<Button x:Name="CollectAdminLogsButton" Content="Admin Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,170,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectInboxRulesButton" Content="InboxRules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,195,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectInboxRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,195,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>
-				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,245,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,245,0,0" Width="105">
+				<Button x:Name="CollectForwardingRulesButton" Content="Forwarding Rules" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,220,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectForwardingRulesComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,220,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>				
-				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,270,0,0" Width="150" IsEnabled="False"/>
-				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,295,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,295,0,0" Width="105">
+				<Button x:Name="CollectM365InfoButton" Content="M365 Info" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,245,0,0" Width="150" IsEnabled="False"/>
+				<Button x:Name="CollectMessageTraceButton" Content="Message Trace" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,270,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectMessageTraceComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,270,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,320,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,320,0,0" Width="105">
+				<Button x:Name="CollectAzureLogsButton" Content="Azure Logs" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,295,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectAzureLogsComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,295,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
 				</ComboBox>					
-				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,345,0,0" Width="150" IsEnabled="False"/>
-				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,345,0,0" Width="105">
+				<Button x:Name="CollectLastPasswordChangeButton" Content="Last Password Change" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,320,0,0" Width="150" IsEnabled="False"/>
+				<ComboBox x:Name="CollectLastPasswordComboBox" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,320,0,0" Width="105">
 					<ComboBoxItem Content="Entire Tenant" />
 					<ComboBoxItem Content="Custom Users" />
-				</ComboBox>						
+				</ComboBox>
+				<Button x:Name="ParseUALButton" Content="Parse UAL Files" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,350,0,0" Width="150"/>
+				<CheckBox x:Name="ParseUALGeoLiteCheckBox" Content="Use GeoLite city lookup" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="170,353,0,0"/>
+				<CheckBox x:Name="ParseUALOverwriteCheckBox" Content="Overwrite parsed files" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="355,353,0,0"/>
 				<TextBox x:Name="M365TextBox" Text="" HorizontalAlignment="Center" Width="740" VerticalAlignment="Bottom" Height="100" Margin="10" TextWrapping="Wrap" IsReadOnly="True"/>		
 				<!-- Add your controls here -->
 			</Grid>
@@ -13348,11 +13350,12 @@ CONNECT AND TEST CLIENT CONNECTION:
 
 CUSTOMIZE LOG COLLECTION:
 - Open lists of 'Custom IPs' and 'Custom Users' to specify targeted log collection using speicif IPs or User names.
-- 'Collect Triage' attempts to gather a comprehensive set of logs using default arguments, excluding Mailbox Audit Logs (MAL) and Message Trace for efficiency.
+- 'Collect Triage' attempts to gather a comprehensive set of logs using default arguments, excluding Message Trace for efficiency.
 
 SELECTIVE LOG COLLECTION:
-- Choose specific types of logs like 'Unified Audit Logs', 'Mailbox Audit Logs', 'Admin Logs', 'Inbox Rules', 'Forwarding Rules', 'M365 Info', 'Message Trace', 'Azure Logs', and 'Last Password Change'.
+- Choose specific types of logs like 'Unified Audit Logs', 'Admin Logs', 'Inbox Rules', 'Forwarding Rules', 'M365 Info', 'Message Trace', 'Azure Logs', and 'Last Password Change'. Use the Unified Audit Log's 'Mailbox Activities' preset for mailbox audit events.
 - Configure each log type with specific parameters like user scope (entire tenant or custom users), IP addresses, operations, and date ranges.
+- Use 'Parse UAL Files' to recursively expand AuditData JSON into Parsed_UAL CSV files. Already parsed source files are skipped by default; select overwrite to rebuild them. Optionally enrich client IP addresses with GeoLite city, state, and country data.
 
 USER AND IP FILTERING:
 - Selectively collect logs for specific users or IP addresses, providing focused and relevant data for analysis.
@@ -14388,14 +14391,6 @@ $OnCollectUALDateComboBoxSelectionChanged = {
     }
 }
 $CollectUALDateComboBox.Add_SelectionChanged($OnCollectUALDateComboBoxSelectionChanged)
-$CollectMALButton = $window.FindName("CollectMALButton")
-$CollectMALButton.Add_Click({ CollectMALButton_Click })
-$CollectMALComboBox = $window.FindName("CollectMALComboBox")
-if ($CollectMALComboBox -ne $null) {
-    $CollectMALComboBox.SelectedIndex = 0
-} else {
-    Write-Host "ComboBox not found."
-}
 $CollectAdminLogsButton = $window.FindName("CollectAdminLogsButton")
 $CollectAdminLogsButton.Add_Click({ CollectAdminLogsButton_Click })
 $CollectInboxRulesButton = $window.FindName("CollectInboxRulesButton")
@@ -14440,6 +14435,10 @@ if ($CollectLastPasswordComboBox -ne $null) {
 } else {
     Write-Host "ComboBox not found."
 }
+$ParseUALButton = $window.FindName("ParseUALButton")
+$ParseUALButton.Add_Click({ ParseUALButton_Click })
+$ParseUALGeoLiteCheckBox = $window.FindName("ParseUALGeoLiteCheckBox")
+$ParseUALOverwriteCheckBox = $window.FindName("ParseUALOverwriteCheckBox")
 $OpenCustomIPListButton.Add_Click({
     Start-Process $global:ipAddressesFilePath
 })
