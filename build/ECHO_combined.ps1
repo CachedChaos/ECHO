@@ -920,28 +920,32 @@ function Process-Plaso {
     Update-Log "Plaso parsing job started for $InputPath." "ProcessSystemTextBox"
 }
 
-function Check-HyabusaProcessingStatus {	
-    # Initialize the completed job count
-    $completedCount = 0
-	
-    foreach ($job in $Global:hayabusalocateJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Hayabusa Timeline completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Hayabusa Timeline completed: $($job.JobName) for $($job.ArtifactPath)"
-				$job.DataAdded = $true		
+function Check-HyabusaProcessingStatus {
+    $finished = 0
+    foreach ($info in $Global:hayabusalocateJobs) {
+        $job = Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if ($job -and $job.State -in @('Completed','Failed','Stopped')) {
+            if (-not $info.DataAdded) {
+                foreach ($line in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)) {
+                    Update-Log ([string]$line) 'ProcessSystemTextBox'
+                }
+                if ($job.State -eq 'Completed' -and (Test-Path -LiteralPath $info.OutputPath -PathType Leaf)) {
+                    if ((Get-Item -LiteralPath $info.OutputPath).Length -eq 0) { Update-Log "Hayabusa produced an empty timeline; review the diagnostic log for skipped events or no matching rules." 'ProcessSystemTextBox' }
+                    Update-Log "Hayabusa Timeline completed: $($info.OutputPath)" 'ProcessSystemTextBox'
+                } else {
+                    $reason = $job.ChildJobs[0].JobStateInfo.Reason
+                    Update-Log "Hayabusa Timeline failed: $($info.JobName). $reason Diagnostic log: $($info.LogPath)" 'ProcessSystemTextBox'
+                }
+                $info.DataAdded = $true
             }
-			$completedCount++
+            $finished++
         }
-	}
-	
-    if ($completedCount -eq $Global:hayabusalocateJobs.Count) {
-        Update-Log "All hayabusa processing completed." "ProcessSystemTextBox"
+    }
+    if ($finished -eq $Global:hayabusalocateJobs.Count) {
         $HyabusaProcessingTimer.Stop()
     }
 }
+
 
 function ProcessHayabusaButton_Click {
     if (-not $ArtifactProcessingPathTextBox.Text -or -not $HayabusaPathTextBox.Text) {
@@ -987,68 +991,67 @@ function ProcessHayabusaButton_Click {
 }
 
 function Process-Hyabusa {
-    param (
-        [string]$InputPath,
-        [string]$HayabusaPath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useGeoDB,
-        [string]$GeoDBPath
-    )
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $HayabusaCSVName = "${timestamp}_${artifactName}_hayabusa.csv"
-    $outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Hayabusa'
-    
-    if (-not (Test-Path $outputBaseFolder)) {
-        $null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
+    param([string]$InputPath, [string]$HayabusaPath,
+          [Nullable[DateTime]]$StartDate, [Nullable[DateTime]]$EndDate,
+          [bool]$useGeoDB, [string]$GeoDBPath)
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+    $artifactName = [IO.Path]::GetFileNameWithoutExtension($InputPath.TrimEnd('\','/'))
+    $outputFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Hayabusa'
+    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    $outputPath = Join-Path $outputFolder "${timestamp}_${artifactName}_hayabusa.csv"
+    $logPath = [IO.Path]::ChangeExtension($outputPath, '.log')
+    $request = @{
+        InputPath=$InputPath; Executable=$HayabusaPath; OutputPath=$outputPath; LogPath=$logPath
+        StartDate=$StartDate; EndDate=$EndDate; UseGeoDB=$useGeoDB; GeoDBPath=$GeoDBPath
     }
-    $outputPath = Join-Path $outputBaseFolder $HayabusaCSVName
-    $hyabusaArguments = @("csv-timeline")
-    if (Test-Path $InputPath -PathType Container) {
-        $hyabusaArguments += ("-d", "`"$InputPath`"", "--RFC-3339", "-o", "`"$OutputPath`"", "-p", "timesketch-verbose", "-U", "-Q", "-w")
-    } else {
-        $hyabusaArguments += ("-f", "`"$InputPath`"", "--RFC-3339", "-o", "`"$OutputPath`"", "-p", "timesketch-verbose", "-U", "-Q", "-w")
+    $job = Start-Job -ArgumentList $request -ScriptBlock {
+        param($request)
+        $ErrorActionPreference = 'Stop'
+        $exe = $request.Executable
+        [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+        'Hayabusa job started.' | Set-Content -LiteralPath $request.LogPath -Encoding UTF8
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Hayabusa executable not found: $exe" }
+        if (-not (Test-Path -LiteralPath $request.InputPath)) { throw "Input path not found: $($request.InputPath)" }
+        # Rules and profiles are relative to Hayabusa's installation directory.
+        Set-Location -LiteralPath (Split-Path -Parent $exe)
+        $ErrorActionPreference = 'Continue' # Native stderr is diagnostic output in Windows PowerShell 5.1.
+        $helpText = (& $exe help 2>&1 | Out-String)
+        $helpExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($helpExit -ne 0) { throw "Cannot inspect Hayabusa commands (exit $helpExit): $helpText" }
+        if ($helpText -match '(?m)^\s*dfir-timeline\s') { $command='dfir-timeline' }
+        elseif ($helpText -match '(?m)^\s*csv-timeline\s') { $command='csv-timeline' }
+        else { throw 'Installed Hayabusa provides no supported timeline command.' }
+        $ErrorActionPreference = 'Continue'
+        $commandHelp = (& $exe $command --help 2>&1 | Out-String)
+        $helpExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($helpExit -ne 0) { throw "Cannot inspect Hayabusa timeline options: $commandHelp" }
+        $timeFlag = if ($commandHelp -cmatch '--rfc-3339') { '--rfc-3339' }
+                    elseif ($commandHelp -cmatch '--RFC-3339') { '--RFC-3339' }
+                    else { throw 'Installed Hayabusa lacks RFC 3339 output support.' }
+        $inputFlag = if (Test-Path -LiteralPath $request.InputPath -PathType Container) { '-d' } else { '-f' }
+        $arguments = @($command,$inputFlag,$request.InputPath,$timeFlag,'-o',$request.OutputPath,'-p','timesketch-verbose','-U','-w')
+        if ($request.UseGeoDB) { $arguments += @('-G',$request.GeoDBPath) }
+        if ($request.StartDate) { $arguments += @('--timeline-start',([datetime]$request.StartDate).ToString('yyyy-MM-dd HH:mm:ss +00:00')) }
+        if ($request.EndDate) { $arguments += @('--timeline-end',([datetime]$request.EndDate).ToString('yyyy-MM-dd HH:mm:ss +00:00')) }
+        "Executable: $exe`r`nArguments: $($arguments -join ' | ')" | Set-Content -LiteralPath $request.LogPath -Encoding UTF8
+        Write-Output "Hayabusa command: $command. Diagnostic log: $($request.LogPath)"
+        # Pass arguments directly: paths and filters must not be evaluated as PowerShell code.
+        $ErrorActionPreference = 'Continue'
+        & $exe @arguments 2>&1 | Out-File -LiteralPath $request.LogPath -Append -Encoding UTF8
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($exitCode -ne 0) { throw "Hayabusa exited with code $exitCode. See $($request.LogPath)." }
+        if (-not (Test-Path -LiteralPath $request.OutputPath -PathType Leaf)) {
+            throw "Hayabusa returned exit code 0 but produced no timeline CSV. See $($request.LogPath)."
+        }
     }
-
-    if ($useGeoDB) {
-        $hyabusaArguments += ("-G", "`"$GeoDBPath`"")
+    $Global:hayabusalocateJobs += [pscustomobject]@{
+        JobObject=$job; JobName="hayabusa_$timestamp"; ArtifactPath=$InputPath
+        OutputPath=$outputPath; LogPath=$logPath; DataAdded=$false
     }
-
-    # Construct the filter string based on provided start and/or end dates
-    $filterString = $null
-    if ($StartDate -and $EndDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-start `"$startDateFormatted`" --timeline-end `"$endDateFormatted`""
-    } elseif ($StartDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-start `"$startDateFormatted`""
-    } elseif ($EndDate) {
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-end `"$endDateFormatted`""
-    }
-
-    if ($filterString) {
-        $hyabusaArguments += $filterString
-    }
-
-    $hyabusaCommand = "& `"$HayabusaPath`" $hyabusaArguments"
-    Update-Log "hyabusaCommand is $hyabusaCommand" "ProcessSystemTextBox"
-    $job = Start-Job -ScriptBlock {
-        param($hyabusaCommand)
-        
-        Invoke-Expression $hyabusaCommand
-        
-    } -ArgumentList ($hyabusaCommand)
-
-    $Global:hayabusalocateJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "hyabusa_$timestamp"
-        ArtifactPath = $InputPath
-        DataAdded = $false
-    }
-
-    Update-Log "Hyabusa parsing job started for $InputPath." "ProcessSystemTextBox"
+    Update-Log "Hayabusa parsing job started for $InputPath. Diagnostic log: $logPath" 'ProcessSystemTextBox'
 }
 
 function Check-ExtractArchivesJobStatus {
@@ -2068,42 +2071,6 @@ function UpdateZimmermanButton_Click {
     }    
 }
 
-function Check-ZircoliteProcessingStatus {	
-    $completedCount = 0	
-    foreach ($job in $Global:zircoliteJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Zircolite completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Zircolite completed: $($job.JobName) for $($job.ArtifactPath)"
-				$job.DataAdded = $true		
-            }
-			$completedCount++
-        }
-	}
-    if ($completedCount -eq $Global:zircoliteJobs.Count) {
-        Update-Log "All Zircolite processing completed." "ProcessSystemTextBox"
-        $zircoliteProcessingTimer.Stop()
-		Perform-Cleanup
-    }
-}
-
-function Perform-Cleanup {
-	$zircoliteFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-	$ZircolitePath = $ZircolitePathTextBox.Text.Trim().Trim('"')	
-	$zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)
-    # Remove empty CSV and small JSON files
-    Get-ChildItem -Path $zircoliteFolder -Filter "*.csv" | Where-Object { $_.Length -eq 0 } | Remove-Item
-    Get-ChildItem -Path $zircoliteFolder -Filter "*.json" | Where-Object { $_.Length -le 1024 } | Remove-Item
-
-    # Move recent zircogui-output-xxxx.zip files
-    $cutoffTime = (Get-Date).AddHours(-6)
-    Get-ChildItem -Path $zircoliteDirectory -Filter "zircogui-output-*.zip" | 
-        Where-Object { $_.CreationTime -gt $cutoffTime } |
-        Move-Item -Destination $zircoliteFolder
-}
-
 function ProcessZircoliteButton_Click {
     if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZircolitePathTextBox.Text) {
         [System.Windows.MessageBox]::Show("Please select an artifact path and Zircolite path.")
@@ -2162,176 +2129,108 @@ function ProcessZircoliteButton_Click {
     }
 }
 
-function Start-ZircoliteDirectoryJob {
-    param (
-        [string]$DirectoryPath,
-        [string]$ZircolitePath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useJson,
-        [bool]$usePackage,
-        [string]$ZircoliteRules,
-        [string]$ZircoliteTemplates,
-        [bool]$Zircolitesysmon
-    )
-
-	$outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-
-	$job = Start-Job -ScriptBlock {
-		param ($DirectoryPath, $ZircolitePath, $StartDate, $EndDate, $useJson, $usePackage, $ZircoliteRules, $ZircoliteTemplates, $Zircolitesysmon, $outputBaseFolder)
-		$zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)	
-
-		$fileFilter = if ($ZircoliteRules -ne "rules_linux.json") { "*.evtx" } else { "*.log" }
-
-		$logFiles = Get-ChildItem -Path $DirectoryPath -Filter $fileFilter -Recurse -File
-		foreach ($logFile in $logFiles) {
-			$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-			$artifactName = [System.IO.Path]::GetFileNameWithoutExtension($logFile.FullName)	
-			$ZircoliteCSVName = "${timestamp}_${artifactName}_zircolite.csv"
-			$ZircoliteJsonName = "${timestamp}_${artifactName}_zircolite.json"
-			$ZircoliteTemplateName = $ZircoliteTemplates.Replace('.tmpl', '.json')	
-			if (-not (Test-Path $outputBaseFolder)) {
-				$null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
-			}
-			$outputPathcsv = Join-Path $outputBaseFolder $ZircoliteCSVName
-			$outputPathjson = Join-Path $outputBaseFolder $ZircoliteJsonName	
-			$outputPathtemplate = Join-Path $outputBaseFolder $ZircoliteTemplateName	
-			$zircoliteArguments = @("--events", "`'$($logFile.FullName)`'", "-r", "rules\$ZircoliteRules")	
-			$filterString = $null
-			if ($StartDate -and $EndDate) {
-				$startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss +00:00")
-				$filterString = "--after `"$startDateFormatted`" --before `"$endDateFormatted`""
-			} elseif ($StartDate) {
-				$startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$filterString = "--after `"$startDateFormatted`""
-			} elseif ($EndDate) {
-				$endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$filterString = "--before `"$endDateFormatted`""
-			}	
-			if ($filterString) {
-				$zircoliteArguments += $filterString
-			}	
-			if ($artifactName -eq "auditd.log") {
-				$zircoliteArguments += ("--auditd" )
-			}	
-			if ($Zircolitesysmon ) {
-				$zircoliteArguments += ("--sysmon-linux" )
-			}		
-			if ($useJson -or $ZircoliteTemplates -ne "Default (None)") {
-				$zircoliteArguments += ("-o", "`'$outputPathjson`'")
-			} else {
-				$zircoliteArguments += ("-o", "`'$outputPathcsv`'", "--csv", "--csv-delimiter", "`",`"")
-			}
-		
-			if ($ZircoliteTemplates -ne "Default (None)" ) {
-				$zircoliteArguments += ("--template", "templates\$ZircoliteTemplates", "--templateOutput", "`'$outputPathtemplate`'")
-			}			
-			if ($usePackage) {
-				$zircoliteArguments += ("--package")
-			}			
-			$zircoliteCommand = "& `"$ZircolitePath`" $zircoliteArguments"
-			Set-Location -Path $zircoliteDirectory			
-            Invoke-Expression $zircoliteCommand
-		}
-	} -ArgumentList $DirectoryPath, $ZircolitePath, $StartDate, $EndDate, $useJson, $usePackage, $ZircoliteRules, $ZircoliteTemplates, $Zircolitesysmon, $outputBaseFolder
-
-    $Global:zircoliteJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "Zircolite Processing for $DirectoryPath"
-        ArtifactPath = $DirectoryPath
-        DataAdded = $false
+function Start-EchoZircoliteJob {
+    param([string]$InputPath,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,
+        [Nullable[datetime]]$EndDate,[bool]$useJson,[bool]$usePackage,
+        [string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $outputFolder=Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
+    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    $request=@{Input=$InputPath;Exe=$ZircolitePath;Start=$StartDate;End=$EndDate;Json=$useJson;
+        Package=$usePackage;Rules=$ZircoliteRules;Template=$ZircoliteTemplates;Sysmon=$Zircolitesysmon;Output=$outputFolder}
+    $job=Start-Job -ArgumentList $request -ScriptBlock {
+        param($request)
+        $ErrorActionPreference='Stop'
+        [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+        $exe=$request.Exe
+        $installation=Split-Path -Parent $exe
+        Set-Location -LiteralPath $installation
+        $rules=Join-Path $installation ('rules\'+$request.Rules)
+        if (-not $request.Rules -or -not (Test-Path -LiteralPath $rules -PathType Leaf)) {
+            throw "Selected ruleset does not exist: $rules. Select an installed ruleset from the Rules list."
+        }
+        $hasTemplate=$request.Template -and $request.Template -ne 'Default (None)'
+        if ($hasTemplate) {
+            $template=Join-Path $installation ('templates\'+$request.Template)
+            if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {throw "Template not found: $template"}
+        }
+        $linux=$request.Sysmon -or $request.Rules -match 'linux'
+        if (Test-Path -LiteralPath $request.Input -PathType Container) {
+            $filter=if($linux){'*.log'}else{'*.evtx'}
+            $files=@(Get-ChildItem -LiteralPath $request.Input -Filter $filter -Recurse -File)
+        } else { $files=@(Get-Item -LiteralPath $request.Input) }
+        if($files.Count -eq 0){throw 'No matching input logs found; nothing was processed.'}
+        foreach($file in $files) {
+            $id=(Get-Date -Format 'yyyyMMdd_HHmmss_fff')+'_'+[guid]::NewGuid().ToString('N').Substring(0,8)
+            $stem=$id+'_'+$file.BaseName+'_zircolite'
+            $json=$request.Json -or $hasTemplate
+            $extension=if($json){'.json'}else{'.csv'}
+            $output=Join-Path $request.Output ($stem+$extension)
+            $log=Join-Path $request.Output ($stem+'.log')
+            $console=Join-Path $request.Output ($stem+'.console.log')
+            $arguments=@('--events',$file.FullName,'--ruleset',$rules,'--outfile',$output,'--logfile',$log)
+            if(-not $json){$arguments+=@('--csv','--csv-delimiter',',')}
+            if($request.Sysmon){$arguments+='--sysmon-linux-input'}
+            elseif($linux){$arguments+='--auditd-input'}
+            if($request.Start){$arguments+=@('--after',([datetime]$request.Start).ToString('yyyy-MM-ddTHH:mm:ss'))}
+            if($request.End){$arguments+=@('--before',([datetime]$request.End).ToString('yyyy-MM-ddTHH:mm:ss'))}
+            if($hasTemplate){
+                $templateOutput=Join-Path $request.Output ($stem+'_'+[IO.Path]::GetFileNameWithoutExtension($request.Template)+'.json')
+                $arguments+=@('--template',$template,'--template-output',$templateOutput)
+            }
+            if($request.Package){
+                $packageFolder=Join-Path $request.Output ($stem+'_package')
+                New-Item -ItemType Directory -Path $packageFolder | Out-Null
+                $arguments+=@('--package','--package-dir',$packageFolder)
+            }
+            "Executable: $exe`r`nArguments: $($arguments -join ' | ')" | Set-Content -LiteralPath $console -Encoding UTF8
+            Write-Output "Zircolite processing $($file.Name). Diagnostic log: $console"
+            $ErrorActionPreference='Continue'
+            & $exe @arguments 2>&1 | Out-File -LiteralPath $console -Append -Encoding UTF8
+            $exitCode=$LASTEXITCODE
+            $ErrorActionPreference='Stop'
+            if($exitCode -ne 0){throw "Zircolite exited with code $exitCode for $($file.Name). See $console"}
+            if(-not (Test-Path -LiteralPath $output -PathType Leaf)){throw "Zircolite produced no detection output for $($file.Name). See $console"}
+            if($hasTemplate -and -not (Test-Path -LiteralPath $templateOutput -PathType Leaf)){throw "Template output missing. See $console"}
+            if($request.Package -and @(Get-ChildItem -LiteralPath $packageFolder -Filter *.zip -File).Count -eq 0){throw "Viewer package missing. See $console"}
+            Write-Output "Zircolite output saved: $output (an empty result can mean no detections; see the diagnostic log)."
+        }
     }
+    $Global:zircoliteJobs+=[pscustomobject]@{JobObject=$job;JobName="Zircolite processing $InputPath";ArtifactPath=$InputPath;DataAdded=$false}
+    Update-Log "Zircolite job started. Results and diagnostic logs: $outputFolder" 'ProcessSystemTextBox'
+}
+
+function Start-ZircoliteDirectoryJob {
+    param([string]$DirectoryPath,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,[Nullable[datetime]]$EndDate,
+        [bool]$useJson,[bool]$usePackage,[string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $parameters=@{}+$PSBoundParameters
+    $parameters.Remove('DirectoryPath');$parameters.InputPath=$DirectoryPath
+    Start-EchoZircoliteJob @parameters
 }
 
 function Process-Zircolite {
-    param (
-        [string]$logFile,
-        [string]$ZircolitePath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useJson,
-        [bool]$usePackage,
-        [bool]$Zircolitesysmon,		
-        [string]$ZircoliteRules,
-        [string]$ZircoliteTemplates
-    )
+    param([string]$logFile,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,[Nullable[datetime]]$EndDate,
+        [bool]$useJson,[bool]$usePackage,[string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $parameters=@{}+$PSBoundParameters
+    $parameters.Remove('logFile');$parameters.InputPath=$logFile
+    Start-EchoZircoliteJob @parameters
+}
 
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)	
-	$artifactName = [System.IO.Path]::GetFileNameWithoutExtension($logFile)	
-    $ZircoliteCSVName = "${timestamp}_${artifactName}_zircolite.csv"
-	$ZircoliteJsonName = "${timestamp}_${artifactName}_zircolite.json"
-	$ZircoliteTemplateName = $ZircoliteTemplates.Replace('.tmpl', '.json')
-    $outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-    
-    if (-not (Test-Path $outputBaseFolder)) {
-        $null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
+function Check-ZircoliteProcessingStatus {
+    $finished=0
+    foreach($info in $Global:zircoliteJobs){
+        $job=Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if($job -and $job.State -in @('Completed','Failed','Stopped')){
+            if(-not $info.DataAdded){
+                foreach($line in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)){Update-Log ([string]$line) 'ProcessSystemTextBox'}
+                if($job.State -eq 'Completed'){Update-Log "Zircolite completed: $($info.JobName)" 'ProcessSystemTextBox'}
+                else {Update-Log "Zircolite failed: $($info.JobName). $($job.ChildJobs[0].JobStateInfo.Reason)" 'ProcessSystemTextBox'}
+                $info.DataAdded=$true
+            }
+            $finished++
+        }
     }
-    $outputPathcsv = Join-Path $outputBaseFolder $ZircoliteCSVName
-    $outputPathjson = Join-Path $outputBaseFolder $ZircoliteJsonName	
-	$outputPathtemplate = Join-Path $outputBaseFolder $ZircoliteTemplateName	
-    $zircoliteArguments = @("--events", "`'$logFile`'", "-r", "rules\$ZircoliteRules")
-
-    # Construct the filter string based on provided start and/or end dates
-    $filterString = $null
-    if ($StartDate -and $EndDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss +00:00")
-        $filterString = "--after `"$startDateFormatted`" --before `"$endDateFormatted`""
-    } elseif ($StartDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $filterString = "--after `"$startDateFormatted`""
-    } elseif ($EndDate) {
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $filterString = "--before `"$endDateFormatted`""
-    }
-
-    if ($filterString) {
-        $zircoliteArguments += $filterString
-    }
-
-    if ($artifactName -eq "auditd.log") {
-        $zircoliteArguments += ("--auditd" )
-    }
-
-    if ($Zircolitesysmon ) {
-        $zircoliteArguments += ("--sysmon-linux" )
-    }
-	
-    if ($useJson -or $ZircoliteTemplates -ne "Default (None)") {
-        $zircoliteArguments += ("-o", "`'$outputPathjson`'")
-    } else {
-		$zircoliteArguments += ("-o", "`'$outputPathcsv`'", "--csv", "--csv-delimiter", "`",`"")
-	}
-
-    if ($ZircoliteTemplates -ne "Default (None)" ) {
-        $zircoliteArguments += ("--template", "templates\$ZircoliteTemplates", "--templateOutput", "`'$outputPathtemplate`'")
-    }
-	
-    if ($usePackage) {
-        $zircoliteArguments += ("--package")
-    }
-	
-    $zircoliteCommand = "& `"$ZircolitePath`" $zircoliteArguments"
-
-
-    Update-Log "Zircolite Command is $zircoliteCommand" "ProcessSystemTextBox"
-    $job = Start-Job -ScriptBlock {
-        param($zircoliteCommand, $zircoliteDirectory)
-        Set-Location -Path $zircoliteDirectory       
-        Invoke-Expression $zircoliteCommand
-        
-    } -ArgumentList ($zircoliteCommand, $zircoliteDirectory)
-
-    $Global:zircoliteJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "zircolite_$timestamp"
-        ArtifactPath = $logFile
-        DataAdded = $false
-    }
-
-    Update-Log "Zircolite parsing job started for $logFile." "ProcessSystemTextBox"
+    if($finished -eq $Global:zircoliteJobs.Count){$zircoliteProcessingTimer.Stop()}
+    # Preserve small JSON, empty CSV, and per-run packages as evidence of the run.
 }
 
 function Check-ZircoliteUpdateStatus {	
@@ -2341,15 +2240,15 @@ function Check-ZircoliteUpdateStatus {
         if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Zircolite rules update completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Zircolite rules update completed: $($job.JobName) for $($job.ArtifactPath)"
+                Receive-Job -Job $updatedJob -ErrorAction SilentlyContinue | ForEach-Object { Update-Log ([string]$_) "ProcessSystemTextBox" }
+                if ($updatedJob.State -eq "Completed") { Update-Log "Zircolite rules update completed: $($job.JobName)" "ProcessSystemTextBox" } else { Update-Log "Zircolite rules update failed: $($updatedJob.ChildJobs[0].JobStateInfo.Reason)" "ProcessSystemTextBox" }
 				$job.DataAdded = $true		
             }
 			$completedCount++
         }
 	}
     if ($completedCount -eq $Global:zircoliteupdateJobs.Count) {
-        Update-Log "Zircolite rules update completed." "ProcessSystemTextBox"
+        Update-Log "Zircolite rule update jobs finished; see individual results above." "ProcessSystemTextBox"
         $zircoliteUpdateTimer.Stop()
     }
 }
@@ -2362,12 +2261,13 @@ function UpdateZircoliteButton_Click {
     Update-Log "Zircolite Command is $zircoliteCommand" "ProcessSystemTextBox"
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $job = Start-Job -ScriptBlock {
-        param($zircoliteCommand, $zircoliteDirectory)
+        param($ZircolitePath, $zircoliteDirectory)
         
         Set-Location -Path $zircoliteDirectory
-        Invoke-Expression $zircoliteCommand
+        & $ZircolitePath -U 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Zircolite rule update exited with code $LASTEXITCODE." }
         
-    } -ArgumentList $zircoliteCommand, $zircoliteDirectory
+    } -ArgumentList $ZircolitePath, $zircoliteDirectory
 
     $Global:zircoliteupdateJobs += [PSCustomObject]@{
         JobObject = $job
@@ -5785,7 +5685,7 @@ function Get-M365PendingClientJobs {
     foreach ($collectionName in @(
         'm365triageJobs','m365UALJobs','m365AdminLogsJobs','m365InboxRulesJobs',
         'm365ForwardingRulesJobs','m365InfoJobs','m365MessageTraceJobs',
-        'm365AzureLogsJobs','m365LastPassJobs','m365GraphConnectionJobs','m365UALParseJobs'
+        'm365AzureLogsJobs','m365LastPassJobs','m365GraphConnectionJobs','m365UALParseJobs','m365ExchangeConnectionJobs'
     )) {
         $collection = @((Get-Variable -Name $collectionName -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
         $retained = @()
@@ -5813,7 +5713,8 @@ function Get-M365PendingClientJobs {
         $Global:m365AzureLogsJobs,
         $Global:m365LastPassJobs,
         $Global:m365GraphConnectionJobs,
-        $Global:m365UALParseJobs
+        $Global:m365UALParseJobs,
+        $Global:m365ExchangeConnectionJobs
     )
 
     $pendingJobs = @()
@@ -5863,6 +5764,94 @@ function Test-M365CanStartRequest {
     Update-Log "Another Microsoft 365 collection is still running: $pendingSummary. Please let it finish before starting $RequestedAction." "M365TextBox"
     return $false
 }
+
+function Initialize-M365Worker {
+    $worker = if ($Global:PipeServerJob) { Get-Job -Id $Global:PipeServerJob.Id -ErrorAction SilentlyContinue }
+    if ($worker -and $worker.State -eq 'Running' -and $Global:pipeName -and -not $Global:M365WorkerNeedsReset) { return }
+    if ($worker) {
+        Stop-Job -Job $worker -ErrorAction SilentlyContinue
+        Remove-Job -Job $worker -Force -ErrorAction SilentlyContinue
+    }
+    $Global:PipeServerJob = $null
+    $Global:pipeName = 'M365Pipe_' + [guid]::NewGuid().ToString()
+    $Global:PipeServerJob = Start-NamedPipeServer -pipeName $Global:pipeName
+    $Global:M365WorkerNeedsReset = $false
+}
+
+function Start-M365ConnectionRequest {
+    param([ValidateSet('Connect-Client','Test-M365Connection')][string]$Command,
+          [int]$ConnectTimeoutMs = 30000, [int]$ResponseTimeoutMs = 300000)
+    $job = Start-Job -ScriptBlock {
+        param($pipeName, $command, $connectTimeoutMs, $responseTimeoutMs)
+        $ErrorActionPreference = 'Stop'
+        $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName,
+            [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
+        try {
+            try { $pipe.Connect($connectTimeoutMs) } catch {
+                throw "The Microsoft 365 worker did not accept the connection. It may be unavailable or busy. Retry Connect Exchange to restart it. $($_.Exception.Message)"
+            }
+            $writer = New-Object System.IO.StreamWriter($pipe)
+            $writer.AutoFlush = $true
+            $reader = New-Object System.IO.StreamReader($pipe)
+            $writer.WriteLine($command)
+            $deadline = [DateTime]::UtcNow.AddMilliseconds($responseTimeoutMs)
+            while ($true) {
+                $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+                $read = $reader.ReadLineAsync()
+                if (-not $read.Wait($remaining)) { throw 'Microsoft 365 sign-in or connection test timed out. Retry Connect Exchange to restart the worker.' }
+                $line = $read.Result
+                if ($null -eq $line) { throw 'The Microsoft 365 worker disconnected before returning a complete response.' }
+                if ($line -eq 'END_OF_MESSAGE') { break }
+                if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Output $line }
+            }
+        } finally { $pipe.Dispose() }
+    } -ArgumentList $Global:pipeName, $Command, $ConnectTimeoutMs, $ResponseTimeoutMs
+    $Global:m365ExchangeConnectionJobs += @{
+        JobObject = $job; JobName = $Command; Command = $Command
+        Processed = $false; Output = @()
+    }
+    $m365ExchangeConnectionJobTimer.Start()
+}
+
+function Check-M365ExchangeConnectionJobs {
+    foreach ($info in @($Global:m365ExchangeConnectionJobs)) {
+        if (-not $info -or $info.Processed) { continue }
+        $job = Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $job) { continue }
+        foreach ($entry in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)) {
+            $info.Output += [string]$entry
+            Update-Log ([string]$entry) 'M365TextBox'
+        }
+        if ($job.State -notin @('Completed','Failed','Stopped')) { continue }
+        $response = $info.Output -join "`r`n"
+        if ($job.State -ne 'Completed') {
+            $reason = $job.ChildJobs[0].JobStateInfo.Reason
+            Update-Log "Microsoft 365 request failed: $reason" 'M365TextBox'
+            $Global:M365WorkerNeedsReset = $true
+            $Global:M365ExchangeConnected = $false
+            $Global:M365GraphConnected = $false
+            Set-M365ExchangeButtonStates -Enabled $false
+            Set-M365GraphButtonStates -Enabled $false
+        } elseif ($info.Command -eq 'Connect-Client') {
+            $Global:M365ExchangeConnected = $response -match '^Connected to Exchange Online'
+            Set-M365ExchangeButtonStates -Enabled $Global:M365ExchangeConnected
+            Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
+            if ($response -match 'aka\.ms/mysecurityinfo') { Open-M365DefaultBrowserUrl -Url 'https://aka.ms/mysecurityinfo' | Out-Null }
+        }
+        $ConnectClientButton.IsEnabled = $true
+        $TestClientConnectionButton.IsEnabled = $true
+        $info.Processed = $true
+    }
+    if (@($Global:m365ExchangeConnectionJobs | Where-Object { -not $_.Processed }).Count -eq 0) {
+        $m365ExchangeConnectionJobTimer.Stop()
+    }
+}
+
+$Global:m365ExchangeConnectionJobs = @()
+$m365ExchangeConnectionJobTimer = New-Object System.Windows.Forms.Timer
+$m365ExchangeConnectionJobTimer.Interval = 500
+$m365ExchangeConnectionJobTimer.Add_Tick({ Check-M365ExchangeConnectionJobs })
+
 
 # Graph authentication runs through the same backend process that performs the
 # collections. The GUI only monitors this client job, so WPF remains responsive.
@@ -6289,40 +6278,16 @@ function ConnectClientButton_Click {
         }
     }
 
-    # Generate a unique pipe name
-    $Global:pipeName = "M365Pipe_$([System.Guid]::NewGuid().ToString())"
-
     try {
-        # Start the named pipe server if not already started
-        if (-not $Global:PipeServerJob) {
-            $Global:PipeServerJob = Start-NamedPipeServer -pipeName $Global:pipeName
-        }
-
-        Update-Log "Starting Exchange Online sign-in..." "M365TextBox"
-        # Send a request to the server to execute Connect-Client function
-        $command = "Connect-Client"
-        $response = Send-CommandToProcess -pipeName $Global:pipeName -commandToSend $command
-        Update-Log $response "M365TextBox"
-        if ($response -match "aka\.ms/mysecurityinfo" -or $response -match "Unsupported browser" -or $response -match "not supported in this sign-in window") {
-            Open-M365DefaultBrowserUrl -Url "https://aka.ms/mysecurityinfo" | Out-Null
-        }
-        if ($response -match "^Connected to Exchange Online") {
-            $Global:M365ExchangeConnected = $true
-            Set-M365ExchangeButtonStates -Enabled $true
-            Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
-            Update-Log "Exchange-backed collections are ready. Graph-backed collections stay separate and will prompt only when needed." "M365TextBox"
-        } else {
-            $Global:M365ExchangeConnected = $false
-            Set-M365ExchangeButtonStates -Enabled $false
-        }
-
-    } catch {
-        # Log the exception
+        Initialize-M365Worker
         $Global:M365ExchangeConnected = $false
         Set-M365ExchangeButtonStates -Enabled $false
-        Update-Log "Failed to send commands: $_" "M365TextBox"
+        Update-Log "Starting Exchange Online sign-in. Complete the Microsoft sign-in prompt; ECHO will remain responsive." "M365TextBox"
+        Start-M365ConnectionRequest -Command 'Connect-Client'
+    } catch {
+        Update-Log "Failed to start Exchange sign-in: $($_.Exception.Message)" "M365TextBox"
+        $ConnectClientButton.IsEnabled = $true
     }
-    $ConnectClientButton.IsEnabled = $true
 }
 
 function ConnectGraphButton_Click {
@@ -6678,7 +6643,7 @@ function Start-NamedPipeServer {
 			throw 'Microsoft Graph authentication expired or is unavailable. Use Connect Graph and complete device-code sign-in again.'
 		}
 
-		function Connect-Graph {
+		function Connect-EchoGraph {
 			param($Writer)
 			try {
 				$disconnectGraphCommand = Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue
@@ -6758,8 +6723,8 @@ function Start-NamedPipeServer {
         # Define embedded functions
         function Connect-Client {
             try {
-                Connect-ExchangeOnline -ShowBanner:$false | Out-Null
-                return "Connected to Exchange Online. Microsoft Graph will be used from the signed-in user session."
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop | Out-Null
+                return "Connected to Exchange Online. Connect Graph separately when needed."
             } catch {
                 $message = $_.Exception.Message
                 if ($message -match "Unsupported browser" -or $message -match "not supported or up-to-date") {
@@ -7413,6 +7378,7 @@ function Start-NamedPipeServer {
             try {
                 while ($pipeServer.IsConnected) {
                     $line = $reader.ReadLine()
+                    if ($null -eq $line) { break }
                     if ($line) {
                         Write-Host "Received request from client: $line"
                         try {
@@ -7426,7 +7392,7 @@ function Start-NamedPipeServer {
                                     $writer.WriteLine(($response | Out-String).Trim())
                                 }
 								"Connect-Graph" {
-									$response = Connect-Graph -Writer $writer
+									$response = Connect-EchoGraph -Writer $writer
 									$writer.WriteLine(($response | Out-String).Trim())
 								}
                                 "Test-M365Connection" {
@@ -7562,6 +7528,7 @@ function Send-CommandToProcess {
 				$streamReader = New-Object System.IO.StreamReader($pipeClient)
 				$responseLines = @()
 				while (($line = $streamReader.ReadLine()) -ne "END_OF_MESSAGE") {
+                    if ($null -eq $line) { throw "Microsoft 365 worker disconnected before completing the response." }
 					if ($line -is [System.Array] -or $line -is [System.Object]) {
 						$line = $line -join "`r`n"
 					}
@@ -7604,29 +7571,19 @@ function Send-CommandToProcess {
 }
 
 function TestClientConnectionButton_Click {
-    $M365TextBox.Text = ""
-    if (-not (Test-M365CanStartRequest -RequestedAction "a Microsoft 365 connection test")) {
+    if (-not (Test-M365CanStartRequest -RequestedAction 'a Microsoft 365 connection test')) { return }
+    if (-not $Global:PipeServerJob -or -not $Global:pipeName -or $Global:M365WorkerNeedsReset) {
+        Update-Log 'Connect Exchange before testing the connection.' 'M365TextBox'
         return
     }
     $TestClientConnectionButton.IsEnabled = $false
-    Update-Log "Testing Tenant Connection..." "M365TextBox"
-    
     try {
-        # Send a request to the server to execute Test-M365Connection function
-        $command = "Test-M365Connection"
-        $response = Send-CommandToProcess -pipeName $Global:pipeName -commandToSend $command
-
-        # Split the response into an array using ';' and loop through each part
-        $responseParts = $response -split ';'
-        foreach ($part in $responseParts) {
-            Update-Log $part.Trim() "M365TextBox"
-        }
-
+        Update-Log 'Testing tenant connection...' 'M365TextBox'
+        Start-M365ConnectionRequest -Command 'Test-M365Connection'
     } catch {
-        # Log the exception
-        Update-Log "Failed to send commands: $_" "M365TextBox"
-    }   
-    $TestClientConnectionButton.IsEnabled = $true
+        Update-Log "Failed to start connection test: $($_.Exception.Message)" 'M365TextBox'
+        $TestClientConnectionButton.IsEnabled = $true
+    }
 }
 
 function CollectTriageButton_Click {
@@ -10372,6 +10329,9 @@ function Start-ToolDownloadJob {
 
     $requiredFunctionNames = @(
         "Invoke-ExternalProcessQuiet",
+        "Get-EchoLatestRelease",
+        "Get-EchoReleaseAsset",
+        "Clear-EchoToolDirectory",
         "Add-ToolToCsv",
         "Test-InternetConnection"
     )
@@ -10559,6 +10519,7 @@ function Sync-ToolsInventoryCsv {
         "Get-ZimmermanTools.ps1",
         "hayabusa*.exe",
         "log2timeline.py",
+        "System.Data.SQLite.dll",
         "loki.exe",
         "Velociraptor*.exe",
         "vol.py",
@@ -10572,51 +10533,68 @@ function Sync-ToolsInventoryCsv {
 }
 
 function Add-ToolToCsv {
-    param(
-        [string]$toolName,
-        [string]$filePath
-    )
-    if ([string]::IsNullOrWhiteSpace($filePath)) {
-        $filePath = Get-ChildItem -Path $toolsDirectory -Filter "$toolName" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+    param([string]$toolName, [string]$filePath, [string]$PackageVersion, [string]$SourceUrl)
+    $explicitPath = -not [string]::IsNullOrWhiteSpace($filePath)
+    if (-not $explicitPath) {
+        $filePath = Get-ChildItem -LiteralPath $toolsDirectory -Filter $toolName -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '[\\/]Temp[^\\/]*[\\/]' } |
+            Select-Object -ExpandProperty FullName -First 1
     }
-
-    if ($null -ne $filePath -and (Test-Path $filePath)) {
-        $csvPath = Join-Path $toolsDirectory "tools.csv"
-        $hash = (Get-FileHash -Path $filePath -Algorithm SHA256).Hash
-
-        # Read existing CSV data if it exists
-        $existingData = @()
-        if (Test-Path $csvPath) {
-            $existingData = Import-Csv -Path $csvPath
-        }
-
-        # Check if an entry with the same hash already exists
-        $existingEntry = $existingData | Where-Object { $_."SHA256 Hash" -eq $hash }
-        if ($existingEntry) {
-            return
-        }
- 
-        $fileInfo = Get-Item $filePath
-        $creationDate = $fileInfo.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
-        $modificationDate = $fileInfo.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
-
-        $toolInfo = [PSCustomObject]@{
-            "Tool Name" = $toolName
-            "SHA256 Hash" = $hash
-            "Creation Date" = $creationDate
-            "Modification Date" = $modificationDate
-        }
-
-        # Append to CSV
-		try {
-			$toolInfo | Export-Csv -Path $csvPath -NoTypeInformation -Append
-		} catch {
-			Update-Log "Failed to update tools.csv. It might be open in another program: $_" "tabPageToolsTextBox"
-		}
-    } else {
-        Update-Log "Tool not found: $toolName" "tabPageToolsTextBox"
+    if (-not $filePath -or -not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+        if ($explicitPath) { throw "Cannot inventory missing tool: $filePath" }
+        Update-Log "Tool not found: $toolName" 'tabPageToolsTextBox'
+        return
+    }
+    $file = Get-Item -LiteralPath $filePath -ErrorAction Stop
+    $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256 -ErrorAction Stop).Hash
+    $version = $file.VersionInfo.FileVersion
+    if ([string]::IsNullOrWhiteSpace($version)) { $version = $file.VersionInfo.ProductVersion }
+    $versionSource = 'File metadata'
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        $version = $PackageVersion
+        $versionSource = 'Release/package'
+    }
+    if ([string]::IsNullOrWhiteSpace($version)) { $version = 'Unknown'; $versionSource = 'Unknown' }
+    # Never persist a credential-bearing URL in the inventory.
+    if ($SourceUrl -match '(?i)(license_key|token|password|api_key)=') { $SourceUrl = '' }
+    $columns = @('Tool Name','SHA256 Hash','Creation Date','Modification Date','Version','Version Source','Package Version','Source URL','File Path')
+    $csvPath = Join-Path $toolsDirectory 'tools.csv'
+    $rows = @()
+    if (Test-Path -LiteralPath $csvPath) {
+        $rows = @(Import-Csv -LiteralPath $csvPath -ErrorAction Stop | Select-Object -Property $columns)
+    }
+    $match = @($rows | Where-Object { $_.'SHA256 Hash' -eq $hash -and
+        ($_.'File Path' -eq $file.FullName -or [string]::IsNullOrWhiteSpace($_.'File Path')) })
+    # Preserve download provenance during later inventory-only scans.
+    if ($match.Count -gt 0) {
+        if (-not $PackageVersion) { $PackageVersion = $match[-1].'Package Version' }
+        if (-not $SourceUrl) { $SourceUrl = $match[-1].'Source URL' }
+        if ($version -eq 'Unknown' -and $PackageVersion) { $version = $PackageVersion; $versionSource = 'Release/package' }
+    }
+    $rows = @($rows | Where-Object { $match -notcontains $_ })
+    foreach ($row in $rows) {
+        if (-not $row.Version) { $row.Version = 'Unknown'; $row.'Version Source' = 'Unknown' }
+    }
+    $rows += [pscustomobject][ordered]@{
+        'Tool Name' = $file.Name
+        'SHA256 Hash' = $hash
+        'Creation Date' = $file.CreationTime.ToString('yyyy-MM-dd HH:mm:ss')
+        'Modification Date' = $file.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
+        'Version' = $version
+        'Version Source' = $versionSource
+        'Package Version' = $PackageVersion
+        'Source URL' = $SourceUrl
+        'File Path' = $file.FullName
+    }
+    $tempCsv = Join-Path $toolsDirectory ('tools.{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+    try {
+        $rows | Export-Csv -LiteralPath $tempCsv -NoTypeInformation -Encoding UTF8 -ErrorAction Stop
+        Move-Item -LiteralPath $tempCsv -Destination $csvPath -Force -ErrorAction Stop
+    } finally {
+        if (Test-Path -LiteralPath $tempCsv) { Remove-Item -LiteralPath $tempCsv -Force -ErrorAction SilentlyContinue }
     }
 }
+
 
 function Test-InternetConnection {
     param (
@@ -10692,6 +10670,40 @@ function DownloadToolButton_Click {
     Update-SelectedToolDownloadStatus
 }
 
+
+function Get-EchoLatestRelease {
+    param([Parameter(Mandatory = $true)][string]$Uri)
+    $release = Invoke-RestMethod -Uri $Uri -Headers @{ 'User-Agent' = 'ECHO'; 'Accept' = 'application/vnd.github+json' } -ErrorAction Stop
+    if (-not $release.tag_name -or $release.draft -or $release.prerelease) {
+        throw "No published stable release returned by $Uri."
+    }
+    return $release
+}
+
+function Get-EchoReleaseAsset {
+    param($Release, [string]$Pattern)
+    $assets = @($Release.assets | Where-Object { $_.name -match $Pattern })
+    if ($assets.Count -ne 1 -or -not $assets[0].browser_download_url) {
+        throw "Expected one asset matching '$Pattern' in release $($Release.tag_name); found $($assets.Count). No older release will be substituted."
+    }
+    return $assets[0].browser_download_url
+}
+
+function Clear-EchoToolDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    # Only clear a direct child of the configured Tools directory.
+    $root = [IO.Path]::GetFullPath($toolsDirectory).TrimEnd('\', '/')
+    $target = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    if (-not [string]::Equals([IO.Path]::GetDirectoryName($target), $root, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clear a directory outside the tool root: $target"
+    }
+    if (Test-Path -LiteralPath $target) {
+        $item = Get-Item -LiteralPath $target -Force
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing to clear a linked tool directory: $target" }
+        Get-ChildItem -LiteralPath $target -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+    }
+}
+
 function Download-7zip {
     # Setup for 7zr.exe
     $7zipFolder = Join-Path $toolsDirectory "7-Zip"
@@ -10699,29 +10711,31 @@ function Download-7zip {
         New-Item -ItemType Directory -Path $7zipFolder | Out-Null
     }	
     $tempFolder = Join-Path $toolsDirectory "Temp7Zip"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
-    # Download 7zr.exe
+    $latestRelease = Get-EchoLatestRelease -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest"
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    # Use bootstrap and Extra package from the same release.
     $7zrPath = Join-Path $tempFolder "7zr.exe"
-    $7zrUrl = "https://www.7-zip.org/a/7zr.exe"
+    $7zrUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^7zr\.exe$'
    try {
         Invoke-WebRequest -UseBasicParsing -Uri $7zrUrl -OutFile $7zrPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download 7zip: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
-    # Download 7z2301-extra.7z
-    $extra7zPath = Join-Path $tempFolder "7z2301-extra.7z"
-    $extra7zUrl = "https://www.7-zip.org/a/7z2301-extra.7z"
+    $extra7zUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^7z[0-9]+-extra\.7z$'
+    $extra7zPath = Join-Path $tempFolder (Split-Path -Leaf $extra7zUrl)
     try {
         Invoke-WebRequest -UseBasicParsing -Uri $extra7zUrl -OutFile $extra7zPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download 7zip: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
-    # Extract 7z2301-extra.7z using 7zr.exe
+    # Extract the selected Extra archive using its matching 7zr.exe
     try {
         Invoke-ExternalProcessQuiet -FilePath $7zrPath -ArgumentList "x `"$extra7zPath`" -o`"$tempFolder`" -y" -WorkingDirectory $tempFolder -ErrorContext "7zr extraction for 7-Zip package"
     } catch {
@@ -10738,8 +10752,8 @@ function Download-7zip {
         $existingHash = if (Test-Path $existing7zPath) { (Get-FileHash -Path $existing7zPath -Algorithm SHA256).Hash } else { "" }
 
         if ($newHash -ne $existingHash) {
-            Copy-Item -Path (Join-Path $tempFolder "*") -Destination $7zipFolder -Force
-            Add-ToolToCsv -toolName "7za.exe" -filePath $existing7zPath
+            Copy-Item -Path (Join-Path $tempFolder "*") -Destination $7zipFolder -Recurse -Force -ErrorAction Stop
+
             Update-Log "7-Zip updated." "tabPageToolsTextBox"
         } else {
             Update-Log "7-Zip is already up-to-date." "tabPageToolsTextBox"
@@ -10747,6 +10761,10 @@ function Download-7zip {
     }
 
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $7zipFolder -Filter '7za.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed 7zip file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName '7za.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $extra7zUrl
 }
 
 function Download-BulkExtractor {
@@ -10756,22 +10774,24 @@ function Download-BulkExtractor {
     }
     
     $tempFolder = Join-Path $toolsDirectory "TempBulkExtractor"
-    $downloadUrl = "https://digitalcorpora.s3.amazonaws.com/downloads/bulk_extractor/bulk_extractor-2.0.0-windows.zip"
-    $downloadPath = Join-Path $tempFolder "bulk_extractor-download.zip"
+    $latestRelease = Get-EchoLatestRelease -Uri "https://api.github.com/repos/simsong/bulk_extractor/releases/latest"
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^bulk_extractor64\.exe$'
+    $downloadPath = Join-Path $tempFolder "bulk_extractor64.exe"
 
     # Ensure the temporary folder exists
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Download to temporary folder
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Bulk Extractor: $_" "tabPageToolsTextBox"
         throw
     }
-    Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
-
-    $tempExecutable = Join-Path $tempFolder "win64\bulk_extractor64.exe"
+    $tempExecutable = $downloadPath
 
     if (Test-Path $tempExecutable) {
         $bulkExtractorExecutable = Get-ChildItem -Path $bulkExtractorFolder -Filter "bulk_extractor64.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
@@ -10782,18 +10802,23 @@ function Download-BulkExtractor {
         if ($newHash -ne $existingHash) {
             # Update the tool as the hash is different
             $destinationPath = Join-Path $bulkExtractorFolder "bulk_extractor64.exe"
-            Copy-Item -Path $tempExecutable -Destination $destinationPath -Force
-            Add-ToolToCsv -toolName "bulk_extractor64.exe" -filePath $destinationPath
+            Copy-Item -Path $tempExecutable -Destination $destinationPath -Force -ErrorAction Stop
+
         } else {
             Update-Log "BulkExtractor is already up-to-date." "tabPageToolsTextBox"
         }
     } else {
         Update-Log "Downloaded BulkExtractor executable not found." "tabPageToolsTextBox"
-        throw "bulk_extractor64.exe not found after download/extraction."
+            throw "Expected tool file is missing after download/extraction."
+
     }
 
     # Clean up temporary folder
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $bulkExtractorFolder -Filter 'bulk_extractor64.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed BulkExtractor file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'bulk_extractor64.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-chainsaw {
@@ -10810,15 +10835,17 @@ function Download-chainsaw {
     }		
     $chainsawExecutable = Get-ChildItem -Path $chainsawFolder -Filter "chainsaw*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $tempFolder = Join-Path $toolsDirectory "Tempchainsaw"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
-    $apiUrl = "https://api.github.com/repos/WithSecureLabs/chainsaw/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^chainsaw_all_platforms.rules.zip$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    $apiUrl = "https://api.github.com/repos/WithSecureOpenSource/chainsaw/releases/latest"
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^chainsaw_all_platforms.rules.zip$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for chainsaw.exe not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	# Decode the URL to get the correct file name
 	$decodedUrl = [System.Web.HttpUtility]::UrlDecode($downloadUrl)
@@ -10826,10 +10853,11 @@ function Download-chainsaw {
 	$downloadPath = Join-Path $tempFolder $originalFileName
 
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download chainsaw: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 	    if (Test-Path $downloadPath) {
 	        # Extract the zip file
@@ -10852,15 +10880,17 @@ function Download-chainsaw {
 	            if (-not $chainsawExecutable -or $newHash -ne $existingHash) {
 					# Check and clear the chainsaw folder
 					if (Test-Path $chainsawFolder) {
-						Remove-Item -Path $chainsawFolder\* -Recurse -Force
+						Clear-EchoToolDirectory -Path $chainsawFolder
 					}
-	                Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable)
-	            } else {
+		            } else {
 	                Update-Log "chainsaw is already up-to-date." "tabPageToolsTextBox"
 	            }
 	            # Always refresh chainsaw package contents so rules are updated
 				$7zipArgs2 = "x `"$downloadPath`" -o`"$chainsawFolder`" -y"
 				Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs2 -WorkingDirectory $chainsawFolder -ErrorContext "7-Zip extraction (final) for chainsaw"
+                $installedChainsaw = Get-ChildItem -LiteralPath $chainsawFolder -Filter "chainsaw*.exe" -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+                if (-not $installedChainsaw) { throw "Chainsaw executable missing after installation." }
+
 	            if (-not $chainsawExecutable -or $newHash -ne $existingHash) {
 	                Update-Log "chainsaw updated." "tabPageToolsTextBox"
 	            } else {
@@ -10868,13 +10898,19 @@ function Download-chainsaw {
 	            }
 	        } else {
 	            Update-Log "Downloaded chainsaw executable not found in the extracted files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 	        }
     } else {
         Update-Log "Downloaded chainsaw executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
     # Cleanup: Delete the temporary folder
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $chainsawFolder -Filter 'chainsaw*.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed chainsaw file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'chainsaw*.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-ClamAV {
@@ -10885,21 +10921,9 @@ function Download-ClamAV {
     $ClamdscanExecutable = Get-ChildItem -Path $ClamAVFolder -Filter "clamdscan.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $existingFreshclam = Get-ChildItem -Path $ClamAVFolder -Filter "freshclam.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 
-    # Existing install: prefer DB signature update in place and skip binary download.
-    if ($ClamdscanExecutable -and (Test-Path $ClamdscanExecutable) -and $existingFreshclam -and (Test-Path $existingFreshclam)) {
-        Update-Log "Existing ClamAV installation found. Updating ClamAV database..." "tabPageToolsTextBox"
-        try {
-            $freshclamDirectory = Split-Path $existingFreshclam
-            Invoke-ExternalProcessQuiet -FilePath $existingFreshclam -WorkingDirectory $freshclamDirectory -ArgumentList "" -ErrorContext "ClamAV database update (existing install)" -TimeoutSeconds 300 -UseShellExecuteHidden
-            Update-Log "ClamAV database updated." "tabPageToolsTextBox"
-        } catch {
-            Update-Log "Error updating ClamAV database: $_" "tabPageToolsTextBox"
-            throw
-        }
-        return
-    }
 
     $tempFolder = Join-Path $toolsDirectory "TempClamAV"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Base URL for ClamAV website
@@ -10909,12 +10933,15 @@ function Download-ClamAV {
     $apiUrl = "$baseUrl/downloads"
     $userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"
     $latestReleasePage = Invoke-WebRequest -UseBasicParsing -Uri $apiUrl -Headers @{ "User-Agent" = $userAgent }
-    $relativePath = $latestReleasePage.Links | Where-Object { $_.href -match 'clamav-\d+\.\d+\.\d+\.win\.x64\.zip$' } | Select-Object -ExpandProperty href -First 1
+    $relativePath = $latestReleasePage.Links | Where-Object { $_.href -match 'clamav-(\d+\.\d+\.\d+)\.win\.x64\.zip$' } | Sort-Object -Descending -Property @{
+        Expression = { if ($_.href -match 'clamav-(\d+\.\d+\.\d+)\.win\.x64\.zip$') { [version]$matches[1] } }
+    } | Select-Object -ExpandProperty href -First 1
     
+    $packageVersion = if ($relativePath -match 'clamav-(\d+\.\d+\.\d+)') { $matches[1] }
     # Check if a valid download path was retrieved
     if ([string]::IsNullOrWhiteSpace($relativePath)) {
         Update-Log "Download URL for ClamAV not found." "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     # Define the path where the downloaded file will be saved
@@ -10922,16 +10949,18 @@ function Download-ClamAV {
     $downloadPath = Join-Path $tempFolder $originalFileName
     
     # Construct the full download URL
-    $downloadUrl = $baseUrl + $relativePath
+    $downloadUrl = ([uri]::new([uri]$baseUrl, [string]$relativePath)).AbsoluteUri
+    Update-Log "Selected ClamAV package: $downloadUrl" "tabPageToolsTextBox"
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download ClamAV: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     if (Test-Path $downloadPath) {
-        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
+        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force -ErrorAction Stop
         Remove-Item -Path $downloadPath -Force
         $extractedClamdscan = Get-ChildItem -Path $tempFolder -Filter "clamdscan.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
         if ($extractedClamdscan) {
@@ -10944,23 +10973,25 @@ function Download-ClamAV {
                 $confFiles = Get-ChildItem -Path $tempFolder -Filter "*.conf.sample" -Recurse
                 foreach ($file in $confFiles) {
                     $newConfPath = Join-Path $clamdscanDirectory ($file.Name -replace "\.sample$", "")
-                    Copy-Item -Path $file.FullName -Destination $newConfPath -Force
+                    Copy-Item -Path $file.FullName -Destination $newConfPath -Force -ErrorAction Stop
                     (Get-Content $newConfPath) | Where-Object { $_ -notmatch "^Example" } | Set-Content $newConfPath
                 }
 
                 # Copy updated contents to the ClamAV folder
-                Remove-Item -Path $ClamAVFolder\* -Recurse -Force
-                Copy-Item -Path $tempFolder\* -Destination $ClamAVFolder -Recurse -Force
-				Add-ToolToCsv -toolName "clamdscan.exe"
+                Clear-EchoToolDirectory -Path $ClamAVFolder
+                Copy-Item -Path $tempFolder\* -Destination $ClamAVFolder -Recurse -Force -ErrorAction Stop
+
                 Update-Log "ClamAV updated." "tabPageToolsTextBox"
             } else {
                 Update-Log "ClamAV is already up-to-date." "tabPageToolsTextBox"
             }
         } else {
             Update-Log "Downloaded ClamAV executable not found in the extracted files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
         }
     } else {
         Update-Log "Downloaded ClamAV zip file not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 		# Run freshclam to update the database
 		try {
@@ -10972,6 +11003,7 @@ function Download-ClamAV {
 				Update-Log "ClamAV database updated." "tabPageToolsTextBox"
 			} else {
 				Update-Log "freshclam.exe not found in ClamAV directory." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 			}
 		} catch {
 			Update-Log "Error updating ClamAV database: $_" "tabPageToolsTextBox"
@@ -10979,6 +11011,10 @@ function Download-ClamAV {
 		}
 
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $ClamAVFolder -Filter 'clamdscan.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed ClamAV file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'clamdscan.exe' -filePath $inventoryFile -PackageVersion $packageVersion -SourceUrl $downloadUrl
 }
 
 function Download-etl2pcapng {
@@ -10994,21 +11030,23 @@ function Download-etl2pcapng {
 
     # Get the latest release URL from GitHub API
     $apiUrl = "https://api.github.com/repos/microsoft/etl2pcapng/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -eq 'etl2pcapng.exe' } | Select-Object -ExpandProperty browser_download_url
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^etl2pcapng\.exe$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for etl2pcapng.exe not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 
     $downloadPath = Join-Path $tempFolder "etl2pcapng.exe"
 
     # Always download to temporary folder
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download et12pcapng: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     if (Test-Path $downloadPath) {
@@ -11018,18 +11056,23 @@ function Download-etl2pcapng {
 
         if ($newHash -ne $existingHash) {
             # Update the tool as the hash is different
-            Copy-Item -Path $downloadPath -Destination $etl2pcapngExecutable -Force
-            Add-ToolToCsv -toolName "etl2pcapng.exe" -filePath $etl2pcapngExecutable
+            Copy-Item -Path $downloadPath -Destination $etl2pcapngExecutable -Force -ErrorAction Stop
+
             Update-Log "etl2pcapng updated." "tabPageToolsTextBox"
         } else {
             Update-Log "etl2pcapng is already up-to-date." "tabPageToolsTextBox"
         }
     } else {
         Update-Log "Downloaded etl2pcapng executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
     # Clean up temporary folder
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $etl2pcapngFolder -Filter 'etl2pcapng.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed etl2pcapng file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'etl2pcapng.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-Ftkimager {
@@ -11074,6 +11117,7 @@ function Download-GeoLite2Databases {
 
     foreach ($db in $dbUrls.Keys) {
         $tempFolder = Join-Path $toolsDirectory ("TempGeoLite2" + $db)
+        Clear-EchoToolDirectory -Path $tempFolder
         New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
         # Download database
@@ -11106,11 +11150,11 @@ function Download-GeoLite2Databases {
                 $existingHash = (Get-FileHash -Path $destinationPath -Algorithm SHA256).Hash
                 $newHash = (Get-FileHash -Path $mmdbPath -Algorithm SHA256).Hash
                 if ($newHash -ne $existingHash) {
-                    Copy-Item -Path $mmdbPath -Destination $destinationPath -Force
+                    Copy-Item -Path $mmdbPath -Destination $destinationPath -Force -ErrorAction Stop
                     $isNewOrUpdated = $true
                 }
             } else {
-                Copy-Item -Path $mmdbPath -Destination $destinationPath -Force
+                Copy-Item -Path $mmdbPath -Destination $destinationPath -Force -ErrorAction Stop
                 $isNewOrUpdated = $true
             }
 
@@ -11135,42 +11179,32 @@ function Download-Hayabusa {
     }		
     $HayabusaExecutable = Get-ChildItem -Path $HayabusaFolder -Filter "hayabusa*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 
-    # Existing install: prefer rules update in place and skip binary download.
-    if ($HayabusaExecutable -and (Test-Path $HayabusaExecutable)) {
-        Update-Log "Existing Hayabusa installation found. Updating rules..." "tabPageToolsTextBox"
-        try {
-            $hayabusaDirectory = Split-Path $HayabusaExecutable
-            Invoke-ExternalProcessQuiet -FilePath $HayabusaExecutable -WorkingDirectory $hayabusaDirectory -ArgumentList "update-rules" -ErrorContext "Hayabusa rules update (existing install)" -TimeoutSeconds 300 -UseShellExecuteHidden
-            Update-Log "Hayabusa rules updated." "tabPageToolsTextBox"
-        } catch {
-            Update-Log "Error updating Hayabusa rules: $_" "tabPageToolsTextBox"
-            throw
-        }
-        return
-    }
 
     $tempFolder = Join-Path $toolsDirectory "TempHayabusa"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
     $apiUrl = "https://api.github.com/repos/Yamato-Security/hayabusa/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^hayabusa.*win-x64.zip$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^hayabusa.*win-x64.zip$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for Hayabusa.exe not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Hayabusa: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
     if (Test-Path $downloadPath) {
         # Extract the zip file
-        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
+        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force -ErrorAction Stop
 
         # Delete the zip file after extraction
         Remove-Item -Path $downloadPath -Force
@@ -11184,11 +11218,11 @@ function Download-Hayabusa {
             $existingHash = if ($HayabusaExecutable -and (Test-Path $HayabusaExecutable)) { (Get-FileHash -Path $HayabusaExecutable -Algorithm SHA256).Hash } else { "" }
 
             if (-not $HayabusaExecutable -or $newHash -ne $existingHash) {
-                Remove-Item -Path $HayabusaFolder\* -Recurse -Force
+                Clear-EchoToolDirectory -Path $HayabusaFolder
 				# Copy all contents from the temp folder to the Hayabusa folder
-				Copy-Item -Path $tempFolder\* -Destination $HayabusaFolder -Recurse -Force
-                $destinationPath = Join-Path $HayabusaFolder (Split-Path -Leaf $extractedExecutable)
-                Add-ToolToCsv -toolName (Split-Path -Leaf $extractedExecutable) -filePath $destinationPath
+				Copy-Item -Path $tempFolder\* -Destination $HayabusaFolder -Recurse -Force -ErrorAction Stop
+                $destinationPath = Get-ChildItem -LiteralPath $HayabusaFolder -Filter "hayabusa*.exe" -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+
                 Update-Log "Hayabusa updated." "tabPageToolsTextBox"
             } else {
                 Update-Log "Hayabusa is already up-to-date." "tabPageToolsTextBox"
@@ -11210,13 +11244,19 @@ function Download-Hayabusa {
             }
         } else {
             Update-Log "Downloaded Hayabusa executable not found in the extracted files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
         }
     } else {
         Update-Log "Downloaded Hayabusa executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
     # Cleanup: Delete the temporary folder
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $HayabusaFolder -Filter 'hayabusa*.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Hayabusa file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'hayabusa*.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-Loki {
@@ -11227,49 +11267,34 @@ function Download-Loki {
     $LokiExecutable = Get-ChildItem -Path $LokiFolder -Filter "loki.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $LokiUpgraderExecutable = Get-ChildItem -Path $LokiFolder -Filter "loki-upgrader.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 
-    # Existing install: prefer signature update in place and skip binary download.
-    if ($LokiExecutable -and (Test-Path $LokiExecutable)) {
-        Update-Log "Existing Loki installation found. Updating signatures..." "tabPageToolsTextBox"
-        try {
-            if ($LokiUpgraderExecutable -and (Test-Path $LokiUpgraderExecutable)) {
-                $lokiUpgraderDirectory = Split-Path $LokiUpgraderExecutable
-                Invoke-ExternalProcessQuiet -FilePath $LokiUpgraderExecutable -WorkingDirectory $lokiUpgraderDirectory -ArgumentList "" -ErrorContext "Loki signatures update (existing install, upgrader)" -TimeoutSeconds 300 -UseShellExecuteHidden
-            } else {
-                $lokiDirectory = Split-Path $LokiExecutable
-                Invoke-ExternalProcessQuiet -FilePath $LokiExecutable -WorkingDirectory $lokiDirectory -ArgumentList "--update" -ErrorContext "Loki signatures update (existing install, loki --update)" -TimeoutSeconds 300 -UseShellExecuteHidden
-            }
-            Update-Log "Loki signatures updated." "tabPageToolsTextBox"
-        } catch {
-            Update-Log "Error updating Loki signatures: $_" "tabPageToolsTextBox"
-            throw
-        }
-        return
-    }
 			
 	$tempFolder = Join-Path $toolsDirectory "TempLoki"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
     $apiUrl = "https://api.github.com/repos/Neo23x0/Loki/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^loki_[\d\.]+\.zip$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^loki_[\d\.]+\.zip$'
 
     if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
         Update-Log "Download URL for Loki not found." "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     $originalFileName = Split-Path -Leaf $downloadUrl
     $downloadPath = Join-Path $tempFolder $originalFileName
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Loki: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     if (Test-Path $downloadPath) {
-        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
+        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force -ErrorAction Stop
         Remove-Item -Path $downloadPath -Force
 
         $extractedLoki = Get-ChildItem -Path $tempFolder -Filter "loki.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
@@ -11279,24 +11304,27 @@ function Download-Loki {
             $existingHash = if ($LokiExecutable -and (Test-Path $LokiExecutable)) { (Get-FileHash -Path $LokiExecutable -Algorithm SHA256).Hash } else { "" }
 
             if (-not $LokiExecutable -or $newHash -ne $existingHash) {
-                Remove-Item -Path $LokiFolder\* -Recurse -Force
-                Copy-Item -Path $tempFolder\* -Destination $LokiFolder -Recurse -Force
-				Add-ToolToCsv -toolName "loki.exe"
+                Clear-EchoToolDirectory -Path $LokiFolder
+                Copy-Item -Path $tempFolder\* -Destination $LokiFolder -Recurse -Force -ErrorAction Stop
+
                 Update-Log "Loki updated." "tabPageToolsTextBox"
             } else {
                 Update-Log "Loki is already up-to-date." "tabPageToolsTextBox"
             }
         } else {
             Update-Log "Downloaded Loki executable not found in the extracted files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
         }
     } else {
         Update-Log "Downloaded Loki zip file not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
+    $LokiExecutable = Get-ChildItem -LiteralPath $LokiFolder -Filter "loki.exe" -Recurse -File | Select-Object -ExpandProperty FullName -First 1
     # Run Loki Upgrader
     try {
         $lokiUpgraderPath = Get-ChildItem -Path $LokiFolder -Filter "loki-upgrader.exe" -Recurse | Select-Object -ExpandProperty FullName -First 1
-        if (Test-Path $lokiUpgraderPath) {
+        if ($lokiUpgraderPath -and (Test-Path $lokiUpgraderPath)) {
             Update-Log "Updating Loki signatures..." "tabPageToolsTextBox"
             $lokiUpgraderDirectory = Split-Path $lokiUpgraderPath
             Invoke-ExternalProcessQuiet -FilePath $lokiUpgraderPath -WorkingDirectory $lokiUpgraderDirectory -ArgumentList "" -ErrorContext "Loki signatures update (post-download)" -TimeoutSeconds 300 -UseShellExecuteHidden
@@ -11315,6 +11343,10 @@ function Download-Loki {
     }
 	
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $LokiFolder -Filter 'loki.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Loki file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'loki.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-Plaso {
@@ -11334,23 +11366,26 @@ function Download-Plaso {
     $tempFolder = Join-Path $toolsDirectory "Tempplaso"
 
     # Ensure the temporary and Plaso folders exist
-    New-Item -ItemType Directory -Path $tempFolder, $PlasoFolder -Force | Out-Null
+    Clear-EchoToolDirectory -Path $tempFolder
+    New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
     $apiUrl = "https://api.github.com/repos/log2timeline/plaso/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^plaso-\d{8}\.tar\.gz$' } | Select-Object -ExpandProperty browser_download_url
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^plaso-\d{8}\.tar\.gz$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for log2timeline.py not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	# Download the plaso package
     $tarGzPath = Join-Path $tempFolder (Split-Path -Leaf $downloadUrl)
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $tarGzPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Plaso: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
     if (Test-Path $tarGzPath) {
         Update-Log "Extracting Plaso archive..." "tabPageToolsTextBox"
@@ -11370,78 +11405,68 @@ function Download-Plaso {
         # Find log2timeline.py in the extracted files
         $log2timelinetempPY = Get-ChildItem -Path $tempFolder -Filter "log2timeline.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 		if ($log2timelinetempPY) {
-			$newHash = (Get-FileHash -Path $log2timelinetempPY -Algorithm SHA256).Hash
-			$existingHash = if ($log2timelinePY) { (Get-FileHash -Path $log2timelinePY -Algorithm SHA256).Hash } else { "" }
-		
-				if (-not $log2timelinePY -or $newHash -ne $existingHash) {
-					Copy-Item -Path (Join-Path $tempFolder "*") -Destination $PlasoFolder -Recurse -Force
-                    $copiedLog2timelinePath = Join-Path $PlasoFolder (Split-Path -Leaf $log2timelinetempPY)
-					Add-ToolToCsv -toolName "log2timeline.py" -filePath $copiedLog2timelinePath
+            # Refresh the complete release even when the launcher is unchanged.
+                    Clear-EchoToolDirectory -Path $PlasoFolder
+					Copy-Item -Path (Join-Path $tempFolder "*") -Destination $PlasoFolder -Recurse -Force -ErrorAction Stop
+                    $copiedLog2timelinePath = Get-ChildItem -LiteralPath $PlasoFolder -Filter "log2timeline.py" -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+                    if (-not $copiedLog2timelinePath) { throw "Plaso script missing from final destination." }
+
 					Update-Log "Plaso updated." "tabPageToolsTextBox"
-				} else {
-				Update-Log "Plaso is already up-to-date." "tabPageToolsTextBox"
-			}
 		} else {
 			Update-Log "log2timeline.py not found in extracted Plaso files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 		}
+    } else {
+        throw "Downloaded Plaso archive is missing."
     }
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $PlasoFolder -Filter 'log2timeline.py' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Plaso file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'log2timeline.py' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-SQLite {
-    $SQLiteFolder = Join-Path $toolsDirectory "SQLite"
-    $tempFolder = Join-Path $toolsDirectory "TempSQLite"
-    $SQLiteUrl = "https://system.data.sqlite.org/downloads/1.0.118.0/sqlite-netFx46-binary-bundle-x64-2015-1.0.118.0.zip"
-    $downloadPath = Join-Path $tempFolder (Split-Path -Leaf $SQLiteUrl)
-
-    if (!(Test-Path $SQLiteFolder)) {
-        New-Item -ItemType Directory -Path $SQLiteFolder | Out-Null
-    }
-    New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
-
+    $SQLiteFolder = Join-Path $toolsDirectory 'SQLite'
+    $tempFolder = Join-Path $toolsDirectory 'TempSQLite'
+    Clear-EchoToolDirectory -Path $tempFolder
+    New-Item -ItemType Directory -Path $tempFolder, $SQLiteFolder -Force | Out-Null
     try {
-        Update-Log "Downloading SQLite package..." "tabPageToolsTextBox"
-        Invoke-WebRequest -UseBasicParsing -Uri $SQLiteUrl -OutFile $downloadPath -ErrorAction Stop
-    } catch {
-        Update-Log "Failed to download SQLite: $_" "tabPageToolsTextBox"
-        throw
-    }
-
-    try {
-        if (-not (Test-Path $downloadPath)) {
-            Update-Log "Downloaded SQLite package not found." "tabPageToolsTextBox"
-            throw "SQLite package missing after download."
-        }
-
-        Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
-        Remove-Item -Path $downloadPath -Force -ErrorAction SilentlyContinue
-
-        $extractedDll = Get-ChildItem -Path $tempFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-        if (-not $extractedDll) {
-            Update-Log "Downloaded SQLite DLL not found in extracted files." "tabPageToolsTextBox"
-            throw "System.Data.SQLite.dll not found in extracted package."
-        }
-
-        $newHash = (Get-FileHash -Path $extractedDll -Algorithm SHA256).Hash
-        $SQLiteExecutable = Get-ChildItem -Path $SQLiteFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-        $existingHash = if ($SQLiteExecutable -and (Test-Path $SQLiteExecutable)) { (Get-FileHash -Path $SQLiteExecutable -Algorithm SHA256).Hash } else { "" }
-
-        if (-not $SQLiteExecutable -or $newHash -ne $existingHash) {
-            Remove-Item -Path "$SQLiteFolder\*" -Recurse -Force -ErrorAction SilentlyContinue
-            Copy-Item -Path "$tempFolder\*" -Destination $SQLiteFolder -Recurse -Force
-            $copiedDllPath = Get-ChildItem -Path $SQLiteFolder -Filter "System.Data.SQLite.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
-            if ($copiedDllPath) {
-                Add-ToolToCsv -toolName "System.Data.SQLite.dll" -filePath $copiedDllPath
-            }
-            Update-Log "SQLite updated." "tabPageToolsTextBox"
-        } else {
-            Update-Log "SQLite is already up-to-date." "tabPageToolsTextBox"
-        }
-    } catch {
-        Update-Log "SQLite processing failed: $_" "tabPageToolsTextBox"
-        throw
+        $index = Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/system.data.sqlite/index.json' -ErrorAction Stop
+        $version = $index.versions | Where-Object { $_ -match '^\d+\.\d+\.\d+(?:\.\d+)?$' } | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
+        if (-not $version) { throw 'No stable System.Data.SQLite package found.' }
+        $url = "https://api.nuget.org/v3-flatcontainer/system.data.sqlite/$version/system.data.sqlite.$version.nupkg"
+        Update-Log "Selected System.Data.SQLite $version : $url" 'tabPageToolsTextBox'
+        $archive = Join-Path $tempFolder 'sqlite.zip'
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $archive -ErrorAction Stop
+        Expand-Archive -LiteralPath $archive -DestinationPath $tempFolder -Force -ErrorAction Stop
+        $frameworkDirectory = Join-Path $tempFolder 'lib\net471'
+        $dll = Join-Path $frameworkDirectory 'System.Data.SQLite.dll'
+        if (-not (Test-Path -LiteralPath $dll)) { throw 'Latest SQLite package lacks the required .NET Framework 4.7.1 assembly; no older version was substituted.' }
+        $nativeIndex = Invoke-RestMethod -Uri 'https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/index.json' -ErrorAction Stop
+        $nativeVersion = $nativeIndex.versions | Where-Object { $_ -match '^\d+\.\d+\.\d+(?:\.\d+)?$' } | Sort-Object { [version]$_ } -Descending | Select-Object -First 1
+        if (-not $nativeVersion) { throw 'No stable native SQLite package found.' }
+        $nativeUrl = "https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/$nativeVersion/sqlitepclraw.lib.e_sqlite3.$nativeVersion.nupkg"
+        Update-Log "Selected SQLite native library $nativeVersion : $nativeUrl" 'tabPageToolsTextBox'
+        $nativeArchive = Join-Path $tempFolder 'native.zip'
+        $nativeFolder = Join-Path $tempFolder 'native'
+        Invoke-WebRequest -UseBasicParsing -Uri $nativeUrl -OutFile $nativeArchive -ErrorAction Stop
+        Expand-Archive -LiteralPath $nativeArchive -DestinationPath $nativeFolder -Force -ErrorAction Stop
+        $architecture = if ([Environment]::Is64BitProcess) { 'win-x64' } else { 'win-x86' }
+        $nativeDll = Join-Path $nativeFolder "runtimes\$architecture\native\e_sqlite3.dll"
+        if (-not (Test-Path -LiteralPath $nativeDll)) { throw "Latest native SQLite package lacks $architecture/e_sqlite3.dll." }
+        Clear-EchoToolDirectory -Path $SQLiteFolder
+        Copy-Item -Path (Join-Path $frameworkDirectory '*') -Destination $SQLiteFolder -Force -ErrorAction Stop
+        Copy-Item -LiteralPath $nativeDll -Destination $SQLiteFolder -Force -ErrorAction Stop
+        Add-ToolToCsv -toolName 'System.Data.SQLite.dll' -filePath (Join-Path $SQLiteFolder 'System.Data.SQLite.dll') -PackageVersion $version -SourceUrl $url
+        Add-ToolToCsv -toolName 'e_sqlite3.dll' -filePath (Join-Path $SQLiteFolder 'e_sqlite3.dll') -PackageVersion $nativeVersion -SourceUrl $nativeUrl
+        Update-Log "System.Data.SQLite $version installed (.NET Framework 4.7.1+)." 'tabPageToolsTextBox'
     } finally {
-        Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
+        Clear-EchoToolDirectory -Path $tempFolder
+        # The clear helper preserves its target directory; remove the empty staging folder too.
+        if (Test-Path -LiteralPath $tempFolder) {
+            [System.IO.Directory]::Delete($tempFolder, $false)
+        }
     }
 }
 
@@ -11452,6 +11477,7 @@ function Download-Velociraptor {
     }		
     $VelociraptorExecutable = Get-ChildItem -Path $VelociraptorFolder -Filter "Velociraptor*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $tempFolder = Join-Path $toolsDirectory "TempVelociraptor"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # ECHO currently depends on Velociraptor behavior that changed in 0.75+.
@@ -11463,7 +11489,7 @@ function Download-Velociraptor {
             $pageReleases = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
         } catch {
             Update-Log "Failed to fetch Velociraptor releases: $_" "tabPageToolsTextBox"
-            return
+            throw "Tool download did not complete. See the preceding log entry."
         }
 
         if (-not $pageReleases -or $pageReleases.Count -eq 0) {
@@ -11481,7 +11507,7 @@ function Download-Velociraptor {
 
     if (-not $compatibleReleases -or $compatibleReleases.Count -eq 0) {
         Update-Log "No compatible Velociraptor 0.74.x release found on GitHub." "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 
     $selectedRelease = $compatibleReleases | Sort-Object -Descending -Property @{
@@ -11496,28 +11522,25 @@ function Download-Velociraptor {
     } | Select-Object -First 1
 
     $downloadAsset = $selectedRelease.assets | Where-Object {
-        $_.name -match '^velociraptor-v0\.74(\.\d+)?[^\\\/]*amd64\.exe$'
+        $_.name -match '^velociraptor-v0\.74(?:\.\d+)?-windows-amd64\.exe$'
+    } | Sort-Object -Descending -Property @{
+        Expression = { if ($_.name -match '^velociraptor-v(0\.74(?:\.\d+)?)-') { [version]$matches[1] } }
     } | Select-Object -First 1
-
-    if (-not $downloadAsset) {
-        $downloadAsset = $selectedRelease.assets | Where-Object {
-            $_.name -match 'amd64\.exe$'
-        } | Select-Object -First 1
-    }
 
     $downloadUrl = if ($downloadAsset) { $downloadAsset.browser_download_url } else { $null }
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for Velociraptor.exe not found in release $($selectedRelease.tag_name)." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
     Update-Log "Downloading Velociraptor $($selectedRelease.tag_name) (pinned to 0.74.x for current ECHO compatibility)." "tabPageToolsTextBox"
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Velociraptor: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 	if (Test-Path $downloadPath) {
 		$newHash = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash
@@ -11526,16 +11549,21 @@ function Download-Velociraptor {
 		if (-not $VelociraptorExecutable -or $newHash -ne $existingHash) {
 			Get-ChildItem -Path $VelociraptorFolder -Filter "Velociraptor*.exe" -Recurse | Remove-Item -Force
 			$destinationPath = Join-Path $VelociraptorFolder $originalFileName
-			Copy-Item -Path $downloadPath -Destination $destinationPath -Force
-			Add-ToolToCsv -toolName $originalFileName -filePath $destinationPath
+			Copy-Item -Path $downloadPath -Destination $destinationPath -Force -ErrorAction Stop
+
 			Update-Log "Velociraptor updated." "tabPageToolsTextBox"
 		} else {
 			Update-Log "Velociraptor is already up-to-date." "tabPageToolsTextBox"
 		}
 	} else {
 		Update-Log "Downloaded Velociraptor executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 	}
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $VelociraptorFolder -Filter 'velociraptor*.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Velociraptor file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'velociraptor*.exe' -filePath $inventoryFile -PackageVersion $selectedRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-Volatility3 {
@@ -11545,53 +11573,55 @@ function Download-Volatility3 {
     }		
     $Volatility3Executable = Get-ChildItem -Path $Volatility3Folder -Filter "vol.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $tempFolder = Join-Path $toolsDirectory "TempVolatility3"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
 	$apiUrl = "https://api.github.com/repos/volatilityfoundation/volatility3/releases/latest"
-	$latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
+	$latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
 	$tagName = $latestRelease.tag_name
 	$downloadUrl = "https://github.com/volatilityfoundation/volatility3/archive/refs/tags/$tagName.zip"
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for Volatility3 not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Volatility: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
-	$TempVelociraptorExecutable = Get-ChildItem -Path $tempFolder -Filter "vol.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 	if (Test-Path $downloadPath) {
 		# Extract the downloaded zip file
-		Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force
+		Expand-Archive -Path $downloadPath -DestinationPath $tempFolder -Force -ErrorAction Stop
 		Remove-Item -Path $downloadPath -Force
 		# Find vol.py in the extracted files
 		$tempVolatilityExecutable = Get-ChildItem -Path $tempFolder -Filter "vol.py" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 	
 		if ($tempVolatilityExecutable) {
-			$newHash = (Get-FileHash -Path $tempVolatilityExecutable -Algorithm SHA256).Hash
-			$existingHash = if ($Volatility3Executable) { (Get-FileHash -Path $Volatility3Executable -Algorithm SHA256).Hash } else { "" }
-	
-			if (-not $Volatility3Executable -or $newHash -ne $existingHash) {
+            # Refresh the complete release even when the launcher is unchanged.
 				# Delete all existing contents before copying new files
-				Remove-Item -Path "$Volatility3Folder\*" -Recurse -Force				
-				Copy-Item -Path (Join-Path $tempFolder "*") -Destination $Volatility3Folder -Recurse -Force
-				Add-ToolToCsv -toolName "vol.py"
+				Clear-EchoToolDirectory -Path $Volatility3Folder
+				Copy-Item -Path (Join-Path $tempFolder "*") -Destination $Volatility3Folder -Recurse -Force -ErrorAction Stop
+
 				Update-Log "Volatility3 updated." "tabPageToolsTextBox"
-			} else {
-				Update-Log "Volatility3 is already up-to-date." "tabPageToolsTextBox"
-			}
 		} else {
 			Update-Log "vol.py not found in extracted Volatility3 files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 		}
 	} else {
 		Update-Log "Downloaded Volatility3 package not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 	}
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $Volatility3Folder -Filter 'vol.py' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Volatility3 file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'vol.py' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-winpmem {
@@ -11601,23 +11631,26 @@ function Download-winpmem {
     }		
     $winpmemExecutable = Get-ChildItem -Path $winpmemFolder -Filter "winpmem*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $tempFolder = Join-Path $toolsDirectory "Tempwinpmem"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
     $apiUrl = "https://api.github.com/repos/Velocidex/WinPmem/releases/latest"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^winpmem.*x64.*exe$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^winpmem.*x64.*exe$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for winpmem.exe not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download winpmem: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 	if (Test-Path $downloadPath) {
 		$newHash = (Get-FileHash -Path $downloadPath -Algorithm SHA256).Hash
@@ -11625,16 +11658,21 @@ function Download-winpmem {
 	
 		if (-not $winpmemExecutable -or $newHash -ne $existingHash) {
 			$destinationPath = Join-Path $winpmemFolder $originalFileName
-			Copy-Item -Path $downloadPath -Destination $destinationPath -Force
-			Add-ToolToCsv -toolName $originalFileName -filePath $destinationPath
+			Copy-Item -Path $downloadPath -Destination $destinationPath -Force -ErrorAction Stop
+
 			Update-Log "winpmem updated." "tabPageToolsTextBox"
 		} else {
 			Update-Log "winpmem is already up-to-date." "tabPageToolsTextBox"
 		}
 	} else {
 		Update-Log "Downloaded winpmem executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 	}
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $winpmemFolder -Filter 'winpmem*.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed winpmem file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'winpmem*.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 function Download-ZimmermanTools {
@@ -11643,6 +11681,7 @@ function Download-ZimmermanTools {
         New-Item -ItemType Directory -Path $ZimmermanToolsFolder | Out-Null
     }	
     $tempFolder = Join-Path $toolsDirectory "TempZimmermanTools"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
 
@@ -11650,15 +11689,16 @@ function Download-ZimmermanTools {
 	$originalFileName = Split-Path -Leaf $downloadUrl
 	$downloadPath = Join-Path $tempFolder $originalFileName	
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download ZimmermanTools: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
 	
     $ZimmermanToolsPath = Join-Path $tempFolder "Get-ZimmermanTools.zip"
     if (Test-Path $ZimmermanToolsPath) {
-        Expand-Archive -Path $ZimmermanToolsPath -DestinationPath $tempFolder -Force
+        Expand-Archive -Path $ZimmermanToolsPath -DestinationPath $tempFolder -Force -ErrorAction Stop
         Remove-Item -Path $ZimmermanToolsPath -Force
 
         $scriptInTemp = Get-ChildItem -Path $tempFolder -Filter "Get-ZimmermanTools.ps1" -Recurse | Select-Object -ExpandProperty FullName -First 1		
@@ -11667,7 +11707,7 @@ function Download-ZimmermanTools {
         $existingHash = if (Test-Path $existingZimmermanToolsPath) { (Get-FileHash -Path $existingZimmermanToolsPath -Algorithm SHA256).Hash } else { "" }
 
         if ($newHash -ne $existingHash) {
-            Copy-Item -Path $scriptInTemp -Destination $ZimmermanToolsFolder -Force
+            Copy-Item -Path $scriptInTemp -Destination $ZimmermanToolsFolder -Force -ErrorAction Stop
             Add-ToolToCsv -toolName "Get-ZimmermanTools.ps1"
         }
 
@@ -11676,10 +11716,14 @@ function Download-ZimmermanTools {
 	        if (Test-Path $scriptPath) {
                 $zimmermanArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Dest `"$ZimmermanToolsFolder`""
                 Invoke-ExternalProcessQuiet -FilePath "powershell.exe" -ArgumentList $zimmermanArgs -WorkingDirectory $ZimmermanToolsFolder -ErrorContext "ZimmermanTools script execution" -TimeoutSeconds 1800
-	            Update-Log "ZimmermanTools script executed." "tabPageToolsTextBox"
+	            Get-ChildItem -LiteralPath $ZimmermanToolsFolder -Filter '*.exe' -Recurse -File | ForEach-Object {
+                    Add-ToolToCsv -toolName $_.Name -filePath $_.FullName
+                }
+                Update-Log "ZimmermanTools script executed." "tabPageToolsTextBox"
 	        }
     } else {
         Update-Log "Downloaded ZimmermanTools package not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
     Remove-Item -Path $tempFolder -Recurse -Force
@@ -11699,15 +11743,17 @@ function Download-Zircolite {
     }		
     $ZircoliteExecutable = Get-ChildItem -Path $ZircoliteFolder -Filter "Zircolite*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
     $tempFolder = Join-Path $toolsDirectory "TempZircolite"
+    Clear-EchoToolDirectory -Path $tempFolder
     New-Item -ItemType Directory -Path $tempFolder -Force | Out-Null
 
     # Get the latest release URL from GitHub API
-    $apiUrl = "https://api.github.com/repos/wagga40/Zircolite/releases"
-    $latestRelease = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" }
-    $downloadUrl = $latestRelease.assets | Where-Object { $_.name -match '^zircolite_win.*7z$' } | Select-Object -ExpandProperty browser_download_url -First 1
+    $apiUrl = "https://api.github.com/repos/wagga40/Zircolite/releases/latest"
+    $latestRelease = Get-EchoLatestRelease -Uri $apiUrl
+    Update-Log "Selected release: $($latestRelease.tag_name)" "tabPageToolsTextBox"
+    $downloadUrl = Get-EchoReleaseAsset -Release $latestRelease -Pattern '^(?:Zircolite-[0-9.]+-windows-x64\.zip|zircolite_win.*\.7z)$'
 	if ([string]::IsNullOrWhiteSpace($downloadUrl)) {
 		Update-Log "Download URL for Zircolite.exe not found." "tabPageToolsTextBox"
-		return
+		throw "Tool download did not complete. See the preceding log entry."
 	}
 	# Decode the URL to get the correct file name
 	$decodedUrl = [System.Web.HttpUtility]::UrlDecode($downloadUrl)
@@ -11715,10 +11761,11 @@ function Download-Zircolite {
 	$downloadPath = Join-Path $tempFolder $originalFileName
 
     try {
+        Update-Log "Downloading package: $downloadUrl" "tabPageToolsTextBox"
         Invoke-WebRequest -UseBasicParsing -Uri $downloadUrl -OutFile $downloadPath -ErrorAction Stop
     } catch {
         Update-Log "Failed to download Zircolite: $_" "tabPageToolsTextBox"
-        return
+        throw "Tool download did not complete. See the preceding log entry."
     }
     if (Test-Path $downloadPath) {
         # Extract the zip file
@@ -11742,16 +11789,16 @@ function Download-Zircolite {
 	            if (-not $ZircoliteExecutable -or $newHash -ne $existingHash) {
 				# Check and clear the Zircolite folder
 				if (Test-Path $ZircoliteFolder) {
-					Remove-Item -Path $ZircoliteFolder\* -Recurse -Force
+					Clear-EchoToolDirectory -Path $ZircoliteFolder
 					}
 					# Use 7-Zip to extract the ZIP file directly into the Zircolite folder
 					$7zipArgs2 = "x `"$downloadPath`" -o`"$ZircoliteFolder`" -y"
 					Invoke-ExternalProcessQuiet -FilePath $7zipPath -ArgumentList $7zipArgs2 -WorkingDirectory $ZircoliteFolder -ErrorContext "7-Zip extraction (final) for Zircolite"
                     $zircoliteExecutableToRun = Get-ChildItem -Path $ZircoliteFolder -Filter "Zircolite*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
                     if ([string]::IsNullOrWhiteSpace($zircoliteExecutableToRun)) {
-                        $zircoliteExecutableToRun = $extractedExecutable
+                        throw "Zircolite executable missing from final installation."
                     }
-	                Add-ToolToCsv -toolName (Split-Path -Leaf $zircoliteExecutableToRun)
+
 	                Update-Log "Zircolite updated." "tabPageToolsTextBox"
 	            } else {
                     $zircoliteExecutableToRun = $ZircoliteExecutable
@@ -11770,6 +11817,7 @@ function Download-Zircolite {
                             $rulesUpdated = $true
                         } catch {
                             Update-Log "Zircolite rules update failed: $_" "tabPageToolsTextBox"
+                            throw
                         }
                     }
 
@@ -11781,17 +11829,22 @@ function Download-Zircolite {
                 }
 	        } else {
 	            Update-Log "Downloaded Zircolite executable not found in the extracted files." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
 	        }
     } else {
         Update-Log "Downloaded Zircolite executable not found." "tabPageToolsTextBox"
+            throw "Expected tool file is missing after download/extraction."
     }
 
     # Cleanup: Delete the temporary folder
     Remove-Item -Path $tempFolder -Recurse -Force
+    # Record provenance even when the selected binary hash is unchanged.
+    $inventoryFile = Get-ChildItem -LiteralPath $ZircoliteFolder -Filter 'zircolite*.exe' -Recurse -File | Select-Object -ExpandProperty FullName -First 1
+    if (-not $inventoryFile) { throw 'Installed Zircolite file missing; download is incomplete.' }
+    Add-ToolToCsv -toolName 'zircolite*.exe' -filePath $inventoryFile -PackageVersion $latestRelease.tag_name -SourceUrl $downloadUrl
 }
 
 ####End functions for Tools Tab####
-
 
 # ---- _EchoMain.ps1 ----
 
@@ -12915,7 +12968,7 @@ function Update-Log {
 				<CheckBox x:Name="ZircolitepackageCheckBox" Content="Create Package" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="570,200,0,0"/>				
 				<Label x:Name="ZircoliteRules" Content="Rules" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,200,0,0"/>	
 				<ComboBox x:Name="ZircoliteRulesComboBox" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="80,200,0,0" Width="180">
-						<ComboBoxItem Content="rules_windows_generic_full.json"/>					
+						<ComboBoxItem Content="rules_windows_generic.json"/>
 				</ComboBox>						
 				<Label x:Name="ZircoliteTemplates" Content="Template" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="265,200,0,0"/>			
 
@@ -14076,14 +14129,14 @@ $ZircoliteRulesComboBox.Add_DropDownOpened({
     $zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePathTextBox.Text)
     $ruleDirectory = Join-Path -Path $zircoliteDirectory -ChildPath "rules"
     if (Test-Path -Path $ruleDirectory) {
-        $ruleFiles = Get-ChildItem -Path $ruleDirectory -Filter "*.json" -File
+        $ruleFiles = Get-ChildItem -Path $ruleDirectory -Filter "rules_*.json" -File
         foreach ($ruleFile in $ruleFiles) {
             $ruleName = $ruleFile.Name
             $ZircoliteRulesComboBox.Items.Add($ruleName)
             $global:zirRulesPaths[$ruleName] = $ruleFile.FullName
         }
     }
-    $ZircoliteRulesComboBox.SelectedIndex = 0
+    if ($ZircoliteRulesComboBox.Items.Contains("rules_windows_generic.json")) { $ZircoliteRulesComboBox.SelectedItem = "rules_windows_generic.json" } else { $ZircoliteRulesComboBox.SelectedIndex = 0 }
 })
 
 $ZircoliteTemplatesComboBox.SelectedIndex = 0
@@ -15534,7 +15587,7 @@ This search filters on Service Creation and related events from Security and Sys
 Specific Event IDs searched for along with a short description:
 Event ID 4697: A service was installed in the system
 Event ID 7000: The service failed to start due to the following error
-Event ID 7009: A timeout was reached while waiting for theÂ service to connect
+Event ID 7009: A timeout was reached while waiting for the service to connect
 Event ID 7045: A new service was installed in the system
 "@
 	"Shimcache" = @"

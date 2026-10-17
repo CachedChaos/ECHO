@@ -1,4 +1,4 @@
-Add-Type -AssemblyName System.Windows.Forms
+﻿Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName PresentationFramework
 
 
@@ -1128,7 +1128,7 @@ function Update-Log {
 				<CheckBox x:Name="ZircolitepackageCheckBox" Content="Create Package" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="570,200,0,0"/>				
 				<Label x:Name="ZircoliteRules" Content="Rules" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,200,0,0"/>	
 				<ComboBox x:Name="ZircoliteRulesComboBox" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="80,200,0,0" Width="180">
-						<ComboBoxItem Content="rules_windows_generic_full.json"/>					
+						<ComboBoxItem Content="rules_windows_generic.json"/>
 				</ComboBox>						
 				<Label x:Name="ZircoliteTemplates" Content="Template" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="265,200,0,0"/>			
 
@@ -2289,14 +2289,14 @@ $ZircoliteRulesComboBox.Add_DropDownOpened({
     $zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePathTextBox.Text)
     $ruleDirectory = Join-Path -Path $zircoliteDirectory -ChildPath "rules"
     if (Test-Path -Path $ruleDirectory) {
-        $ruleFiles = Get-ChildItem -Path $ruleDirectory -Filter "*.json" -File
+        $ruleFiles = Get-ChildItem -Path $ruleDirectory -Filter "rules_*.json" -File
         foreach ($ruleFile in $ruleFiles) {
             $ruleName = $ruleFile.Name
             $ZircoliteRulesComboBox.Items.Add($ruleName)
             $global:zirRulesPaths[$ruleName] = $ruleFile.FullName
         }
     }
-    $ZircoliteRulesComboBox.SelectedIndex = 0
+    if ($ZircoliteRulesComboBox.Items.Contains("rules_windows_generic.json")) { $ZircoliteRulesComboBox.SelectedItem = "rules_windows_generic.json" } else { $ZircoliteRulesComboBox.SelectedIndex = 0 }
 })
 
 $ZircoliteTemplatesComboBox.SelectedIndex = 0

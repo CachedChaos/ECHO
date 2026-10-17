@@ -1,4 +1,4 @@
-####Starting functions for System Processing####
+﻿####Starting functions for System Processing####
 
 #Timer for bulk extractor initialization
 $Global:bulkJobs = @()
@@ -701,28 +701,32 @@ function Process-Plaso {
     Update-Log "Plaso parsing job started for $InputPath." "ProcessSystemTextBox"
 }
 
-function Check-HyabusaProcessingStatus {	
-    # Initialize the completed job count
-    $completedCount = 0
-	
-    foreach ($job in $Global:hayabusalocateJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Hayabusa Timeline completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Hayabusa Timeline completed: $($job.JobName) for $($job.ArtifactPath)"
-				$job.DataAdded = $true		
+function Check-HyabusaProcessingStatus {
+    $finished = 0
+    foreach ($info in $Global:hayabusalocateJobs) {
+        $job = Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if ($job -and $job.State -in @('Completed','Failed','Stopped')) {
+            if (-not $info.DataAdded) {
+                foreach ($line in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)) {
+                    Update-Log ([string]$line) 'ProcessSystemTextBox'
+                }
+                if ($job.State -eq 'Completed' -and (Test-Path -LiteralPath $info.OutputPath -PathType Leaf)) {
+                    if ((Get-Item -LiteralPath $info.OutputPath).Length -eq 0) { Update-Log "Hayabusa produced an empty timeline; review the diagnostic log for skipped events or no matching rules." 'ProcessSystemTextBox' }
+                    Update-Log "Hayabusa Timeline completed: $($info.OutputPath)" 'ProcessSystemTextBox'
+                } else {
+                    $reason = $job.ChildJobs[0].JobStateInfo.Reason
+                    Update-Log "Hayabusa Timeline failed: $($info.JobName). $reason Diagnostic log: $($info.LogPath)" 'ProcessSystemTextBox'
+                }
+                $info.DataAdded = $true
             }
-			$completedCount++
+            $finished++
         }
-	}
-	
-    if ($completedCount -eq $Global:hayabusalocateJobs.Count) {
-        Update-Log "All hayabusa processing completed." "ProcessSystemTextBox"
+    }
+    if ($finished -eq $Global:hayabusalocateJobs.Count) {
         $HyabusaProcessingTimer.Stop()
     }
 }
+
 
 function ProcessHayabusaButton_Click {
     if (-not $ArtifactProcessingPathTextBox.Text -or -not $HayabusaPathTextBox.Text) {
@@ -768,68 +772,67 @@ function ProcessHayabusaButton_Click {
 }
 
 function Process-Hyabusa {
-    param (
-        [string]$InputPath,
-        [string]$HayabusaPath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useGeoDB,
-        [string]$GeoDBPath
-    )
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $HayabusaCSVName = "${timestamp}_${artifactName}_hayabusa.csv"
-    $outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Hayabusa'
-    
-    if (-not (Test-Path $outputBaseFolder)) {
-        $null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
+    param([string]$InputPath, [string]$HayabusaPath,
+          [Nullable[DateTime]]$StartDate, [Nullable[DateTime]]$EndDate,
+          [bool]$useGeoDB, [string]$GeoDBPath)
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss_fff'
+    $artifactName = [IO.Path]::GetFileNameWithoutExtension($InputPath.TrimEnd('\','/'))
+    $outputFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Hayabusa'
+    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    $outputPath = Join-Path $outputFolder "${timestamp}_${artifactName}_hayabusa.csv"
+    $logPath = [IO.Path]::ChangeExtension($outputPath, '.log')
+    $request = @{
+        InputPath=$InputPath; Executable=$HayabusaPath; OutputPath=$outputPath; LogPath=$logPath
+        StartDate=$StartDate; EndDate=$EndDate; UseGeoDB=$useGeoDB; GeoDBPath=$GeoDBPath
     }
-    $outputPath = Join-Path $outputBaseFolder $HayabusaCSVName
-    $hyabusaArguments = @("csv-timeline")
-    if (Test-Path $InputPath -PathType Container) {
-        $hyabusaArguments += ("-d", "`"$InputPath`"", "--RFC-3339", "-o", "`"$OutputPath`"", "-p", "timesketch-verbose", "-U", "-Q", "-w")
-    } else {
-        $hyabusaArguments += ("-f", "`"$InputPath`"", "--RFC-3339", "-o", "`"$OutputPath`"", "-p", "timesketch-verbose", "-U", "-Q", "-w")
+    $job = Start-Job -ArgumentList $request -ScriptBlock {
+        param($request)
+        $ErrorActionPreference = 'Stop'
+        $exe = $request.Executable
+        [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+        'Hayabusa job started.' | Set-Content -LiteralPath $request.LogPath -Encoding UTF8
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Hayabusa executable not found: $exe" }
+        if (-not (Test-Path -LiteralPath $request.InputPath)) { throw "Input path not found: $($request.InputPath)" }
+        # Rules and profiles are relative to Hayabusa's installation directory.
+        Set-Location -LiteralPath (Split-Path -Parent $exe)
+        $ErrorActionPreference = 'Continue' # Native stderr is diagnostic output in Windows PowerShell 5.1.
+        $helpText = (& $exe help 2>&1 | Out-String)
+        $helpExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($helpExit -ne 0) { throw "Cannot inspect Hayabusa commands (exit $helpExit): $helpText" }
+        if ($helpText -match '(?m)^\s*dfir-timeline\s') { $command='dfir-timeline' }
+        elseif ($helpText -match '(?m)^\s*csv-timeline\s') { $command='csv-timeline' }
+        else { throw 'Installed Hayabusa provides no supported timeline command.' }
+        $ErrorActionPreference = 'Continue'
+        $commandHelp = (& $exe $command --help 2>&1 | Out-String)
+        $helpExit = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($helpExit -ne 0) { throw "Cannot inspect Hayabusa timeline options: $commandHelp" }
+        $timeFlag = if ($commandHelp -cmatch '--rfc-3339') { '--rfc-3339' }
+                    elseif ($commandHelp -cmatch '--RFC-3339') { '--RFC-3339' }
+                    else { throw 'Installed Hayabusa lacks RFC 3339 output support.' }
+        $inputFlag = if (Test-Path -LiteralPath $request.InputPath -PathType Container) { '-d' } else { '-f' }
+        $arguments = @($command,$inputFlag,$request.InputPath,$timeFlag,'-o',$request.OutputPath,'-p','timesketch-verbose','-U','-w')
+        if ($request.UseGeoDB) { $arguments += @('-G',$request.GeoDBPath) }
+        if ($request.StartDate) { $arguments += @('--timeline-start',([datetime]$request.StartDate).ToString('yyyy-MM-dd HH:mm:ss +00:00')) }
+        if ($request.EndDate) { $arguments += @('--timeline-end',([datetime]$request.EndDate).ToString('yyyy-MM-dd HH:mm:ss +00:00')) }
+        "Executable: $exe`r`nArguments: $($arguments -join ' | ')" | Set-Content -LiteralPath $request.LogPath -Encoding UTF8
+        Write-Output "Hayabusa command: $command. Diagnostic log: $($request.LogPath)"
+        # Pass arguments directly: paths and filters must not be evaluated as PowerShell code.
+        $ErrorActionPreference = 'Continue'
+        & $exe @arguments 2>&1 | Out-File -LiteralPath $request.LogPath -Append -Encoding UTF8
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        if ($exitCode -ne 0) { throw "Hayabusa exited with code $exitCode. See $($request.LogPath)." }
+        if (-not (Test-Path -LiteralPath $request.OutputPath -PathType Leaf)) {
+            throw "Hayabusa returned exit code 0 but produced no timeline CSV. See $($request.LogPath)."
+        }
     }
-
-    if ($useGeoDB) {
-        $hyabusaArguments += ("-G", "`"$GeoDBPath`"")
+    $Global:hayabusalocateJobs += [pscustomobject]@{
+        JobObject=$job; JobName="hayabusa_$timestamp"; ArtifactPath=$InputPath
+        OutputPath=$outputPath; LogPath=$logPath; DataAdded=$false
     }
-
-    # Construct the filter string based on provided start and/or end dates
-    $filterString = $null
-    if ($StartDate -and $EndDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-start `"$startDateFormatted`" --timeline-end `"$endDateFormatted`""
-    } elseif ($StartDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-start `"$startDateFormatted`""
-    } elseif ($EndDate) {
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-dd HH:mm:ss +00:00")
-        $filterString = "--timeline-end `"$endDateFormatted`""
-    }
-
-    if ($filterString) {
-        $hyabusaArguments += $filterString
-    }
-
-    $hyabusaCommand = "& `"$HayabusaPath`" $hyabusaArguments"
-    Update-Log "hyabusaCommand is $hyabusaCommand" "ProcessSystemTextBox"
-    $job = Start-Job -ScriptBlock {
-        param($hyabusaCommand)
-        
-        Invoke-Expression $hyabusaCommand
-        
-    } -ArgumentList ($hyabusaCommand)
-
-    $Global:hayabusalocateJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "hyabusa_$timestamp"
-        ArtifactPath = $InputPath
-        DataAdded = $false
-    }
-
-    Update-Log "Hyabusa parsing job started for $InputPath." "ProcessSystemTextBox"
+    Update-Log "Hayabusa parsing job started for $InputPath. Diagnostic log: $logPath" 'ProcessSystemTextBox'
 }
 
 function Check-ExtractArchivesJobStatus {
@@ -1849,42 +1852,6 @@ function UpdateZimmermanButton_Click {
     }    
 }
 
-function Check-ZircoliteProcessingStatus {	
-    $completedCount = 0	
-    foreach ($job in $Global:zircoliteJobs) {
-        $updatedJob = Get-Job -Id $job.JobObject.Id		
-        if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
-            if (-not $job.DataAdded) {
-				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Zircolite completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Zircolite completed: $($job.JobName) for $($job.ArtifactPath)"
-				$job.DataAdded = $true		
-            }
-			$completedCount++
-        }
-	}
-    if ($completedCount -eq $Global:zircoliteJobs.Count) {
-        Update-Log "All Zircolite processing completed." "ProcessSystemTextBox"
-        $zircoliteProcessingTimer.Stop()
-		Perform-Cleanup
-    }
-}
-
-function Perform-Cleanup {
-	$zircoliteFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-	$ZircolitePath = $ZircolitePathTextBox.Text.Trim().Trim('"')	
-	$zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)
-    # Remove empty CSV and small JSON files
-    Get-ChildItem -Path $zircoliteFolder -Filter "*.csv" | Where-Object { $_.Length -eq 0 } | Remove-Item
-    Get-ChildItem -Path $zircoliteFolder -Filter "*.json" | Where-Object { $_.Length -le 1024 } | Remove-Item
-
-    # Move recent zircogui-output-xxxx.zip files
-    $cutoffTime = (Get-Date).AddHours(-6)
-    Get-ChildItem -Path $zircoliteDirectory -Filter "zircogui-output-*.zip" | 
-        Where-Object { $_.CreationTime -gt $cutoffTime } |
-        Move-Item -Destination $zircoliteFolder
-}
-
 function ProcessZircoliteButton_Click {
     if (-not $ArtifactProcessingPathTextBox.Text -or -not $ZircolitePathTextBox.Text) {
         [System.Windows.MessageBox]::Show("Please select an artifact path and Zircolite path.")
@@ -1943,176 +1910,108 @@ function ProcessZircoliteButton_Click {
     }
 }
 
-function Start-ZircoliteDirectoryJob {
-    param (
-        [string]$DirectoryPath,
-        [string]$ZircolitePath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useJson,
-        [bool]$usePackage,
-        [string]$ZircoliteRules,
-        [string]$ZircoliteTemplates,
-        [bool]$Zircolitesysmon
-    )
-
-	$outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-
-	$job = Start-Job -ScriptBlock {
-		param ($DirectoryPath, $ZircolitePath, $StartDate, $EndDate, $useJson, $usePackage, $ZircoliteRules, $ZircoliteTemplates, $Zircolitesysmon, $outputBaseFolder)
-		$zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)	
-
-		$fileFilter = if ($ZircoliteRules -ne "rules_linux.json") { "*.evtx" } else { "*.log" }
-
-		$logFiles = Get-ChildItem -Path $DirectoryPath -Filter $fileFilter -Recurse -File
-		foreach ($logFile in $logFiles) {
-			$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-			$artifactName = [System.IO.Path]::GetFileNameWithoutExtension($logFile.FullName)	
-			$ZircoliteCSVName = "${timestamp}_${artifactName}_zircolite.csv"
-			$ZircoliteJsonName = "${timestamp}_${artifactName}_zircolite.json"
-			$ZircoliteTemplateName = $ZircoliteTemplates.Replace('.tmpl', '.json')	
-			if (-not (Test-Path $outputBaseFolder)) {
-				$null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
-			}
-			$outputPathcsv = Join-Path $outputBaseFolder $ZircoliteCSVName
-			$outputPathjson = Join-Path $outputBaseFolder $ZircoliteJsonName	
-			$outputPathtemplate = Join-Path $outputBaseFolder $ZircoliteTemplateName	
-			$zircoliteArguments = @("--events", "`'$($logFile.FullName)`'", "-r", "rules\$ZircoliteRules")	
-			$filterString = $null
-			if ($StartDate -and $EndDate) {
-				$startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss +00:00")
-				$filterString = "--after `"$startDateFormatted`" --before `"$endDateFormatted`""
-			} elseif ($StartDate) {
-				$startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$filterString = "--after `"$startDateFormatted`""
-			} elseif ($EndDate) {
-				$endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss")
-				$filterString = "--before `"$endDateFormatted`""
-			}	
-			if ($filterString) {
-				$zircoliteArguments += $filterString
-			}	
-			if ($artifactName -eq "auditd.log") {
-				$zircoliteArguments += ("--auditd" )
-			}	
-			if ($Zircolitesysmon ) {
-				$zircoliteArguments += ("--sysmon-linux" )
-			}		
-			if ($useJson -or $ZircoliteTemplates -ne "Default (None)") {
-				$zircoliteArguments += ("-o", "`'$outputPathjson`'")
-			} else {
-				$zircoliteArguments += ("-o", "`'$outputPathcsv`'", "--csv", "--csv-delimiter", "`",`"")
-			}
-		
-			if ($ZircoliteTemplates -ne "Default (None)" ) {
-				$zircoliteArguments += ("--template", "templates\$ZircoliteTemplates", "--templateOutput", "`'$outputPathtemplate`'")
-			}			
-			if ($usePackage) {
-				$zircoliteArguments += ("--package")
-			}			
-			$zircoliteCommand = "& `"$ZircolitePath`" $zircoliteArguments"
-			Set-Location -Path $zircoliteDirectory			
-            Invoke-Expression $zircoliteCommand
-		}
-	} -ArgumentList $DirectoryPath, $ZircolitePath, $StartDate, $EndDate, $useJson, $usePackage, $ZircoliteRules, $ZircoliteTemplates, $Zircolitesysmon, $outputBaseFolder
-
-    $Global:zircoliteJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "Zircolite Processing for $DirectoryPath"
-        ArtifactPath = $DirectoryPath
-        DataAdded = $false
+function Start-EchoZircoliteJob {
+    param([string]$InputPath,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,
+        [Nullable[datetime]]$EndDate,[bool]$useJson,[bool]$usePackage,
+        [string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $outputFolder=Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
+    New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
+    $request=@{Input=$InputPath;Exe=$ZircolitePath;Start=$StartDate;End=$EndDate;Json=$useJson;
+        Package=$usePackage;Rules=$ZircoliteRules;Template=$ZircoliteTemplates;Sysmon=$Zircolitesysmon;Output=$outputFolder}
+    $job=Start-Job -ArgumentList $request -ScriptBlock {
+        param($request)
+        $ErrorActionPreference='Stop'
+        [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+        $exe=$request.Exe
+        $installation=Split-Path -Parent $exe
+        Set-Location -LiteralPath $installation
+        $rules=Join-Path $installation ('rules\'+$request.Rules)
+        if (-not $request.Rules -or -not (Test-Path -LiteralPath $rules -PathType Leaf)) {
+            throw "Selected ruleset does not exist: $rules. Select an installed ruleset from the Rules list."
+        }
+        $hasTemplate=$request.Template -and $request.Template -ne 'Default (None)'
+        if ($hasTemplate) {
+            $template=Join-Path $installation ('templates\'+$request.Template)
+            if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {throw "Template not found: $template"}
+        }
+        $linux=$request.Sysmon -or $request.Rules -match 'linux'
+        if (Test-Path -LiteralPath $request.Input -PathType Container) {
+            $filter=if($linux){'*.log'}else{'*.evtx'}
+            $files=@(Get-ChildItem -LiteralPath $request.Input -Filter $filter -Recurse -File)
+        } else { $files=@(Get-Item -LiteralPath $request.Input) }
+        if($files.Count -eq 0){throw 'No matching input logs found; nothing was processed.'}
+        foreach($file in $files) {
+            $id=(Get-Date -Format 'yyyyMMdd_HHmmss_fff')+'_'+[guid]::NewGuid().ToString('N').Substring(0,8)
+            $stem=$id+'_'+$file.BaseName+'_zircolite'
+            $json=$request.Json -or $hasTemplate
+            $extension=if($json){'.json'}else{'.csv'}
+            $output=Join-Path $request.Output ($stem+$extension)
+            $log=Join-Path $request.Output ($stem+'.log')
+            $console=Join-Path $request.Output ($stem+'.console.log')
+            $arguments=@('--events',$file.FullName,'--ruleset',$rules,'--outfile',$output,'--logfile',$log)
+            if(-not $json){$arguments+=@('--csv','--csv-delimiter',',')}
+            if($request.Sysmon){$arguments+='--sysmon-linux-input'}
+            elseif($linux){$arguments+='--auditd-input'}
+            if($request.Start){$arguments+=@('--after',([datetime]$request.Start).ToString('yyyy-MM-ddTHH:mm:ss'))}
+            if($request.End){$arguments+=@('--before',([datetime]$request.End).ToString('yyyy-MM-ddTHH:mm:ss'))}
+            if($hasTemplate){
+                $templateOutput=Join-Path $request.Output ($stem+'_'+[IO.Path]::GetFileNameWithoutExtension($request.Template)+'.json')
+                $arguments+=@('--template',$template,'--template-output',$templateOutput)
+            }
+            if($request.Package){
+                $packageFolder=Join-Path $request.Output ($stem+'_package')
+                New-Item -ItemType Directory -Path $packageFolder | Out-Null
+                $arguments+=@('--package','--package-dir',$packageFolder)
+            }
+            "Executable: $exe`r`nArguments: $($arguments -join ' | ')" | Set-Content -LiteralPath $console -Encoding UTF8
+            Write-Output "Zircolite processing $($file.Name). Diagnostic log: $console"
+            $ErrorActionPreference='Continue'
+            & $exe @arguments 2>&1 | Out-File -LiteralPath $console -Append -Encoding UTF8
+            $exitCode=$LASTEXITCODE
+            $ErrorActionPreference='Stop'
+            if($exitCode -ne 0){throw "Zircolite exited with code $exitCode for $($file.Name). See $console"}
+            if(-not (Test-Path -LiteralPath $output -PathType Leaf)){throw "Zircolite produced no detection output for $($file.Name). See $console"}
+            if($hasTemplate -and -not (Test-Path -LiteralPath $templateOutput -PathType Leaf)){throw "Template output missing. See $console"}
+            if($request.Package -and @(Get-ChildItem -LiteralPath $packageFolder -Filter *.zip -File).Count -eq 0){throw "Viewer package missing. See $console"}
+            Write-Output "Zircolite output saved: $output (an empty result can mean no detections; see the diagnostic log)."
+        }
     }
+    $Global:zircoliteJobs+=[pscustomobject]@{JobObject=$job;JobName="Zircolite processing $InputPath";ArtifactPath=$InputPath;DataAdded=$false}
+    Update-Log "Zircolite job started. Results and diagnostic logs: $outputFolder" 'ProcessSystemTextBox'
+}
+
+function Start-ZircoliteDirectoryJob {
+    param([string]$DirectoryPath,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,[Nullable[datetime]]$EndDate,
+        [bool]$useJson,[bool]$usePackage,[string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $parameters=@{}+$PSBoundParameters
+    $parameters.Remove('DirectoryPath');$parameters.InputPath=$DirectoryPath
+    Start-EchoZircoliteJob @parameters
 }
 
 function Process-Zircolite {
-    param (
-        [string]$logFile,
-        [string]$ZircolitePath,
-        [Nullable[DateTime]]$StartDate,
-        [Nullable[DateTime]]$EndDate,
-        [bool]$useJson,
-        [bool]$usePackage,
-        [bool]$Zircolitesysmon,		
-        [string]$ZircoliteRules,
-        [string]$ZircoliteTemplates
-    )
+    param([string]$logFile,[string]$ZircolitePath,[Nullable[datetime]]$StartDate,[Nullable[datetime]]$EndDate,
+        [bool]$useJson,[bool]$usePackage,[string]$ZircoliteRules,[string]$ZircoliteTemplates,[bool]$Zircolitesysmon)
+    $parameters=@{}+$PSBoundParameters
+    $parameters.Remove('logFile');$parameters.InputPath=$logFile
+    Start-EchoZircoliteJob @parameters
+}
 
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $zircoliteDirectory = [System.IO.Path]::GetDirectoryName($ZircolitePath)	
-	$artifactName = [System.IO.Path]::GetFileNameWithoutExtension($logFile)	
-    $ZircoliteCSVName = "${timestamp}_${artifactName}_zircolite.csv"
-	$ZircoliteJsonName = "${timestamp}_${artifactName}_zircolite.json"
-	$ZircoliteTemplateName = $ZircoliteTemplates.Replace('.tmpl', '.json')
-    $outputBaseFolder = Join-Path $global:currentcasedirectory 'SystemArtifacts\ProcessedArtifacts\Zircolite'
-    
-    if (-not (Test-Path $outputBaseFolder)) {
-        $null = New-Item -Path $outputBaseFolder -ItemType Directory -Force
+function Check-ZircoliteProcessingStatus {
+    $finished=0
+    foreach($info in $Global:zircoliteJobs){
+        $job=Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if($job -and $job.State -in @('Completed','Failed','Stopped')){
+            if(-not $info.DataAdded){
+                foreach($line in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)){Update-Log ([string]$line) 'ProcessSystemTextBox'}
+                if($job.State -eq 'Completed'){Update-Log "Zircolite completed: $($info.JobName)" 'ProcessSystemTextBox'}
+                else {Update-Log "Zircolite failed: $($info.JobName). $($job.ChildJobs[0].JobStateInfo.Reason)" 'ProcessSystemTextBox'}
+                $info.DataAdded=$true
+            }
+            $finished++
+        }
     }
-    $outputPathcsv = Join-Path $outputBaseFolder $ZircoliteCSVName
-    $outputPathjson = Join-Path $outputBaseFolder $ZircoliteJsonName	
-	$outputPathtemplate = Join-Path $outputBaseFolder $ZircoliteTemplateName	
-    $zircoliteArguments = @("--events", "`'$logFile`'", "-r", "rules\$ZircoliteRules")
-
-    # Construct the filter string based on provided start and/or end dates
-    $filterString = $null
-    if ($StartDate -and $EndDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss +00:00")
-        $filterString = "--after `"$startDateFormatted`" --before `"$endDateFormatted`""
-    } elseif ($StartDate) {
-        $startDateFormatted = (Get-Date $StartDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $filterString = "--after `"$startDateFormatted`""
-    } elseif ($EndDate) {
-        $endDateFormatted = (Get-Date $EndDate -Format "yyyy-MM-ddTHH:mm:ss")
-        $filterString = "--before `"$endDateFormatted`""
-    }
-
-    if ($filterString) {
-        $zircoliteArguments += $filterString
-    }
-
-    if ($artifactName -eq "auditd.log") {
-        $zircoliteArguments += ("--auditd" )
-    }
-
-    if ($Zircolitesysmon ) {
-        $zircoliteArguments += ("--sysmon-linux" )
-    }
-	
-    if ($useJson -or $ZircoliteTemplates -ne "Default (None)") {
-        $zircoliteArguments += ("-o", "`'$outputPathjson`'")
-    } else {
-		$zircoliteArguments += ("-o", "`'$outputPathcsv`'", "--csv", "--csv-delimiter", "`",`"")
-	}
-
-    if ($ZircoliteTemplates -ne "Default (None)" ) {
-        $zircoliteArguments += ("--template", "templates\$ZircoliteTemplates", "--templateOutput", "`'$outputPathtemplate`'")
-    }
-	
-    if ($usePackage) {
-        $zircoliteArguments += ("--package")
-    }
-	
-    $zircoliteCommand = "& `"$ZircolitePath`" $zircoliteArguments"
-
-
-    Update-Log "Zircolite Command is $zircoliteCommand" "ProcessSystemTextBox"
-    $job = Start-Job -ScriptBlock {
-        param($zircoliteCommand, $zircoliteDirectory)
-        Set-Location -Path $zircoliteDirectory       
-        Invoke-Expression $zircoliteCommand
-        
-    } -ArgumentList ($zircoliteCommand, $zircoliteDirectory)
-
-    $Global:zircoliteJobs += [PSCustomObject]@{
-        JobObject = $job
-        JobName = "zircolite_$timestamp"
-        ArtifactPath = $logFile
-        DataAdded = $false
-    }
-
-    Update-Log "Zircolite parsing job started for $logFile." "ProcessSystemTextBox"
+    if($finished -eq $Global:zircoliteJobs.Count){$zircoliteProcessingTimer.Stop()}
+    # Preserve small JSON, empty CSV, and per-run packages as evidence of the run.
 }
 
 function Check-ZircoliteUpdateStatus {	
@@ -2122,15 +2021,15 @@ function Check-ZircoliteUpdateStatus {
         if ($updatedJob.State -eq "Completed" -or $updatedJob.State -eq "Failed") {
             if (-not $job.DataAdded) {
 				$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-                Update-Log "Zircolite rules update completed: $($job.JobName)" "ProcessSystemTextBox"
-				Write-Host "$timestamp Zircolite rules update completed: $($job.JobName) for $($job.ArtifactPath)"
+                Receive-Job -Job $updatedJob -ErrorAction SilentlyContinue | ForEach-Object { Update-Log ([string]$_) "ProcessSystemTextBox" }
+                if ($updatedJob.State -eq "Completed") { Update-Log "Zircolite rules update completed: $($job.JobName)" "ProcessSystemTextBox" } else { Update-Log "Zircolite rules update failed: $($updatedJob.ChildJobs[0].JobStateInfo.Reason)" "ProcessSystemTextBox" }
 				$job.DataAdded = $true		
             }
 			$completedCount++
         }
 	}
     if ($completedCount -eq $Global:zircoliteupdateJobs.Count) {
-        Update-Log "Zircolite rules update completed." "ProcessSystemTextBox"
+        Update-Log "Zircolite rule update jobs finished; see individual results above." "ProcessSystemTextBox"
         $zircoliteUpdateTimer.Stop()
     }
 }
@@ -2143,12 +2042,13 @@ function UpdateZircoliteButton_Click {
     Update-Log "Zircolite Command is $zircoliteCommand" "ProcessSystemTextBox"
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $job = Start-Job -ScriptBlock {
-        param($zircoliteCommand, $zircoliteDirectory)
+        param($ZircolitePath, $zircoliteDirectory)
         
         Set-Location -Path $zircoliteDirectory
-        Invoke-Expression $zircoliteCommand
+        & $ZircolitePath -U 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Zircolite rule update exited with code $LASTEXITCODE." }
         
-    } -ArgumentList $zircoliteCommand, $zircoliteDirectory
+    } -ArgumentList $ZircolitePath, $zircoliteDirectory
 
     $Global:zircoliteupdateJobs += [PSCustomObject]@{
         JobObject = $job

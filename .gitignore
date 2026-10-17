@@ -38,6 +38,7 @@ output/
 tmp/
 Tools/
 tools/
+test/
 # -------------------------
 # Secrets / credentials
 # -------------------------
@@ -74,6 +75,10 @@ trufflehog-results.json
 # Other project files
 # -------------------------
 DEVELOPMENT.md
+TOOL_DOWNLOADS.md
 .vscode/*
 !.vscode/tasks.json
 !.vscode/settings.json
+
+# Local validation files
+/tests/

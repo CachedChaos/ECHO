@@ -1,4 +1,4 @@
-$global:ipAddressesFilePath = $null
+﻿$global:ipAddressesFilePath = $null
 $global:usernamesFilePath = $null
 
 # Define a global variable to track the pipe server job
@@ -351,7 +351,7 @@ function Get-M365PendingClientJobs {
     foreach ($collectionName in @(
         'm365triageJobs','m365UALJobs','m365AdminLogsJobs','m365InboxRulesJobs',
         'm365ForwardingRulesJobs','m365InfoJobs','m365MessageTraceJobs',
-        'm365AzureLogsJobs','m365LastPassJobs','m365GraphConnectionJobs','m365UALParseJobs'
+        'm365AzureLogsJobs','m365LastPassJobs','m365GraphConnectionJobs','m365UALParseJobs','m365ExchangeConnectionJobs'
     )) {
         $collection = @((Get-Variable -Name $collectionName -Scope Global -ValueOnly -ErrorAction SilentlyContinue))
         $retained = @()
@@ -379,7 +379,8 @@ function Get-M365PendingClientJobs {
         $Global:m365AzureLogsJobs,
         $Global:m365LastPassJobs,
         $Global:m365GraphConnectionJobs,
-        $Global:m365UALParseJobs
+        $Global:m365UALParseJobs,
+        $Global:m365ExchangeConnectionJobs
     )
 
     $pendingJobs = @()
@@ -429,6 +430,94 @@ function Test-M365CanStartRequest {
     Update-Log "Another Microsoft 365 collection is still running: $pendingSummary. Please let it finish before starting $RequestedAction." "M365TextBox"
     return $false
 }
+
+function Initialize-M365Worker {
+    $worker = if ($Global:PipeServerJob) { Get-Job -Id $Global:PipeServerJob.Id -ErrorAction SilentlyContinue }
+    if ($worker -and $worker.State -eq 'Running' -and $Global:pipeName -and -not $Global:M365WorkerNeedsReset) { return }
+    if ($worker) {
+        Stop-Job -Job $worker -ErrorAction SilentlyContinue
+        Remove-Job -Job $worker -Force -ErrorAction SilentlyContinue
+    }
+    $Global:PipeServerJob = $null
+    $Global:pipeName = 'M365Pipe_' + [guid]::NewGuid().ToString()
+    $Global:PipeServerJob = Start-NamedPipeServer -pipeName $Global:pipeName
+    $Global:M365WorkerNeedsReset = $false
+}
+
+function Start-M365ConnectionRequest {
+    param([ValidateSet('Connect-Client','Test-M365Connection')][string]$Command,
+          [int]$ConnectTimeoutMs = 30000, [int]$ResponseTimeoutMs = 300000)
+    $job = Start-Job -ScriptBlock {
+        param($pipeName, $command, $connectTimeoutMs, $responseTimeoutMs)
+        $ErrorActionPreference = 'Stop'
+        $pipe = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipeName,
+            [System.IO.Pipes.PipeDirection]::InOut, [System.IO.Pipes.PipeOptions]::Asynchronous)
+        try {
+            try { $pipe.Connect($connectTimeoutMs) } catch {
+                throw "The Microsoft 365 worker did not accept the connection. It may be unavailable or busy. Retry Connect Exchange to restart it. $($_.Exception.Message)"
+            }
+            $writer = New-Object System.IO.StreamWriter($pipe)
+            $writer.AutoFlush = $true
+            $reader = New-Object System.IO.StreamReader($pipe)
+            $writer.WriteLine($command)
+            $deadline = [DateTime]::UtcNow.AddMilliseconds($responseTimeoutMs)
+            while ($true) {
+                $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+                $read = $reader.ReadLineAsync()
+                if (-not $read.Wait($remaining)) { throw 'Microsoft 365 sign-in or connection test timed out. Retry Connect Exchange to restart the worker.' }
+                $line = $read.Result
+                if ($null -eq $line) { throw 'The Microsoft 365 worker disconnected before returning a complete response.' }
+                if ($line -eq 'END_OF_MESSAGE') { break }
+                if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Output $line }
+            }
+        } finally { $pipe.Dispose() }
+    } -ArgumentList $Global:pipeName, $Command, $ConnectTimeoutMs, $ResponseTimeoutMs
+    $Global:m365ExchangeConnectionJobs += @{
+        JobObject = $job; JobName = $Command; Command = $Command
+        Processed = $false; Output = @()
+    }
+    $m365ExchangeConnectionJobTimer.Start()
+}
+
+function Check-M365ExchangeConnectionJobs {
+    foreach ($info in @($Global:m365ExchangeConnectionJobs)) {
+        if (-not $info -or $info.Processed) { continue }
+        $job = Get-Job -Id $info.JobObject.Id -ErrorAction SilentlyContinue
+        if (-not $job) { continue }
+        foreach ($entry in @(Receive-Job -Job $job -ErrorAction SilentlyContinue)) {
+            $info.Output += [string]$entry
+            Update-Log ([string]$entry) 'M365TextBox'
+        }
+        if ($job.State -notin @('Completed','Failed','Stopped')) { continue }
+        $response = $info.Output -join "`r`n"
+        if ($job.State -ne 'Completed') {
+            $reason = $job.ChildJobs[0].JobStateInfo.Reason
+            Update-Log "Microsoft 365 request failed: $reason" 'M365TextBox'
+            $Global:M365WorkerNeedsReset = $true
+            $Global:M365ExchangeConnected = $false
+            $Global:M365GraphConnected = $false
+            Set-M365ExchangeButtonStates -Enabled $false
+            Set-M365GraphButtonStates -Enabled $false
+        } elseif ($info.Command -eq 'Connect-Client') {
+            $Global:M365ExchangeConnected = $response -match '^Connected to Exchange Online'
+            Set-M365ExchangeButtonStates -Enabled $Global:M365ExchangeConnected
+            Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
+            if ($response -match 'aka\.ms/mysecurityinfo') { Open-M365DefaultBrowserUrl -Url 'https://aka.ms/mysecurityinfo' | Out-Null }
+        }
+        $ConnectClientButton.IsEnabled = $true
+        $TestClientConnectionButton.IsEnabled = $true
+        $info.Processed = $true
+    }
+    if (@($Global:m365ExchangeConnectionJobs | Where-Object { -not $_.Processed }).Count -eq 0) {
+        $m365ExchangeConnectionJobTimer.Stop()
+    }
+}
+
+$Global:m365ExchangeConnectionJobs = @()
+$m365ExchangeConnectionJobTimer = New-Object System.Windows.Forms.Timer
+$m365ExchangeConnectionJobTimer.Interval = 500
+$m365ExchangeConnectionJobTimer.Add_Tick({ Check-M365ExchangeConnectionJobs })
+
 
 # Graph authentication runs through the same backend process that performs the
 # collections. The GUI only monitors this client job, so WPF remains responsive.
@@ -855,40 +944,16 @@ function ConnectClientButton_Click {
         }
     }
 
-    # Generate a unique pipe name
-    $Global:pipeName = "M365Pipe_$([System.Guid]::NewGuid().ToString())"
-
     try {
-        # Start the named pipe server if not already started
-        if (-not $Global:PipeServerJob) {
-            $Global:PipeServerJob = Start-NamedPipeServer -pipeName $Global:pipeName
-        }
-
-        Update-Log "Starting Exchange Online sign-in..." "M365TextBox"
-        # Send a request to the server to execute Connect-Client function
-        $command = "Connect-Client"
-        $response = Send-CommandToProcess -pipeName $Global:pipeName -commandToSend $command
-        Update-Log $response "M365TextBox"
-        if ($response -match "aka\.ms/mysecurityinfo" -or $response -match "Unsupported browser" -or $response -match "not supported in this sign-in window") {
-            Open-M365DefaultBrowserUrl -Url "https://aka.ms/mysecurityinfo" | Out-Null
-        }
-        if ($response -match "^Connected to Exchange Online") {
-            $Global:M365ExchangeConnected = $true
-            Set-M365ExchangeButtonStates -Enabled $true
-            Set-M365GraphButtonStates -Enabled $Global:M365GraphConnected
-            Update-Log "Exchange-backed collections are ready. Graph-backed collections stay separate and will prompt only when needed." "M365TextBox"
-        } else {
-            $Global:M365ExchangeConnected = $false
-            Set-M365ExchangeButtonStates -Enabled $false
-        }
-
-    } catch {
-        # Log the exception
+        Initialize-M365Worker
         $Global:M365ExchangeConnected = $false
         Set-M365ExchangeButtonStates -Enabled $false
-        Update-Log "Failed to send commands: $_" "M365TextBox"
+        Update-Log "Starting Exchange Online sign-in. Complete the Microsoft sign-in prompt; ECHO will remain responsive." "M365TextBox"
+        Start-M365ConnectionRequest -Command 'Connect-Client'
+    } catch {
+        Update-Log "Failed to start Exchange sign-in: $($_.Exception.Message)" "M365TextBox"
+        $ConnectClientButton.IsEnabled = $true
     }
-    $ConnectClientButton.IsEnabled = $true
 }
 
 function ConnectGraphButton_Click {
@@ -1244,7 +1309,7 @@ function Start-NamedPipeServer {
 			throw 'Microsoft Graph authentication expired or is unavailable. Use Connect Graph and complete device-code sign-in again.'
 		}
 
-		function Connect-Graph {
+		function Connect-EchoGraph {
 			param($Writer)
 			try {
 				$disconnectGraphCommand = Get-Command -Name Disconnect-MgGraph -ErrorAction SilentlyContinue
@@ -1324,8 +1389,8 @@ function Start-NamedPipeServer {
         # Define embedded functions
         function Connect-Client {
             try {
-                Connect-ExchangeOnline -ShowBanner:$false | Out-Null
-                return "Connected to Exchange Online. Microsoft Graph will be used from the signed-in user session."
+                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop | Out-Null
+                return "Connected to Exchange Online. Connect Graph separately when needed."
             } catch {
                 $message = $_.Exception.Message
                 if ($message -match "Unsupported browser" -or $message -match "not supported or up-to-date") {
@@ -1979,6 +2044,7 @@ function Start-NamedPipeServer {
             try {
                 while ($pipeServer.IsConnected) {
                     $line = $reader.ReadLine()
+                    if ($null -eq $line) { break }
                     if ($line) {
                         Write-Host "Received request from client: $line"
                         try {
@@ -1992,7 +2058,7 @@ function Start-NamedPipeServer {
                                     $writer.WriteLine(($response | Out-String).Trim())
                                 }
 								"Connect-Graph" {
-									$response = Connect-Graph -Writer $writer
+									$response = Connect-EchoGraph -Writer $writer
 									$writer.WriteLine(($response | Out-String).Trim())
 								}
                                 "Test-M365Connection" {
@@ -2128,6 +2194,7 @@ function Send-CommandToProcess {
 				$streamReader = New-Object System.IO.StreamReader($pipeClient)
 				$responseLines = @()
 				while (($line = $streamReader.ReadLine()) -ne "END_OF_MESSAGE") {
+                    if ($null -eq $line) { throw "Microsoft 365 worker disconnected before completing the response." }
 					if ($line -is [System.Array] -or $line -is [System.Object]) {
 						$line = $line -join "`r`n"
 					}
@@ -2170,29 +2237,19 @@ function Send-CommandToProcess {
 }
 
 function TestClientConnectionButton_Click {
-    $M365TextBox.Text = ""
-    if (-not (Test-M365CanStartRequest -RequestedAction "a Microsoft 365 connection test")) {
+    if (-not (Test-M365CanStartRequest -RequestedAction 'a Microsoft 365 connection test')) { return }
+    if (-not $Global:PipeServerJob -or -not $Global:pipeName -or $Global:M365WorkerNeedsReset) {
+        Update-Log 'Connect Exchange before testing the connection.' 'M365TextBox'
         return
     }
     $TestClientConnectionButton.IsEnabled = $false
-    Update-Log "Testing Tenant Connection..." "M365TextBox"
-    
     try {
-        # Send a request to the server to execute Test-M365Connection function
-        $command = "Test-M365Connection"
-        $response = Send-CommandToProcess -pipeName $Global:pipeName -commandToSend $command
-
-        # Split the response into an array using ';' and loop through each part
-        $responseParts = $response -split ';'
-        foreach ($part in $responseParts) {
-            Update-Log $part.Trim() "M365TextBox"
-        }
-
+        Update-Log 'Testing tenant connection...' 'M365TextBox'
+        Start-M365ConnectionRequest -Command 'Test-M365Connection'
     } catch {
-        # Log the exception
-        Update-Log "Failed to send commands: $_" "M365TextBox"
-    }   
-    $TestClientConnectionButton.IsEnabled = $true
+        Update-Log "Failed to start connection test: $($_.Exception.Message)" 'M365TextBox'
+        $TestClientConnectionButton.IsEnabled = $true
+    }
 }
 
 function CollectTriageButton_Click {
